@@ -109,3 +109,38 @@
 - 新增 student 产物：
   - `report_student/student_task_metrics.csv`
   - `report_student/student_key_task_summary.csv`
+
+## 11) 本次文档定位重构（从规范包到完整实验工程）
+- 仓库主叙事已从“给 Codex 的规范包”切换为“可执行、可复现实验工程”。
+- `README.md` 改为实验入口导航与结果解读入口。
+- 新增 `docs/23_experiment_playbook.md` 作为实验解释主手册。
+- `codex/` 保留但降级为历史附录，不再作为主入口。
+
+## 12) 结果快照解释规则
+- `smoke` 快照：
+  - 仅用于链路可执行性、schema/格式正确性、报告产物完整性验证。
+  - 不进入论文主结论。
+- `formal` 快照：
+  - 仅在真实后端 + 严格失败语义下产生。
+  - 结合 `retrieval_scope=sample` 与多 seed 结果，作为论文主表依据。
+- 主结论最低约束：
+  - `run_mode=formal`
+  - `retrieval_scope=sample`
+  - `key_tasks=multi_doc_qa,code_qa`
+  - 报告包含 `95%CI` 与门槛判定文件。
+
+## 13) 关键任务门槛判定解释样例（decision_gate.json）
+- 文件：`report_key/decision_gate.json`
+- 关键字段语义：
+  - `pass`：是否通过最终门槛
+  - `thresholds`：门槛定义
+  - `observed`：当前聚合统计下的观测值
+  - `checks`：每一项门槛的通过/失败
+  - `fail_reasons`：失败原因列表（便于答辩与排障）
+
+示例解释（当前 smoke 快照）：
+- `pass=false`，表示当前关键任务结论未达标。
+- 若 `delta_f1_pass=false`：说明效果增益不足。
+- 若 `latency_ratio_pass=false`：说明延迟成本超过门槛。
+- 若 `retrieval_ratio_pass=false`：说明检索成本超过门槛。
+- 该样例用于验证判定器行为，不用于 formal 主结论。
