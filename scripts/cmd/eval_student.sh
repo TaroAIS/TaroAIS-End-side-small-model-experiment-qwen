@@ -6,4 +6,5 @@ source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
   --agent_config configs/agent.yaml \
   --dataset data/minilongbench_test.jsonl \
   --checkpoint checkpoints/student \
-  --out_dir report_student/
+  --out_dir report_student/ \
+  --run_mode "$RUN_MODE"

@@ -10,6 +10,7 @@ def main():
     parser.add_argument("--train", required=True)
     parser.add_argument("--out_dir", required=True)
     parser.add_argument("--prefer_real", action="store_true", help="Try real training stack if available.")
+    parser.add_argument("--run_mode", choices=["smoke", "formal"], default="formal")
     args = parser.parse_args()
 
     summary = train_student_model(
@@ -17,6 +18,7 @@ def main():
         train_path=args.train,
         out_dir=args.out_dir,
         prefer_real=args.prefer_real,
+        run_mode=args.run_mode,
     )
     print("student training finished: {}".format(summary.get("mode", "unknown")))
 

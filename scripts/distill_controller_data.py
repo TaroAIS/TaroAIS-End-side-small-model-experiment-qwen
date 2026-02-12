@@ -14,8 +14,12 @@ from utils.runtime import schema_path
 from utils.schema import validate_records
 
 
-def _teacher_to_driver_cfg(cfg):
+def _teacher_to_driver_cfg(cfg, run_mode):
     teacher = cfg.get("teacher", {})
+    mode = str(run_mode).lower()
+    enable_fallback = bool(cfg.get("fallback", {}).get("enable", True))
+    if mode == "formal":
+        enable_fallback = False
     out = {
         "model": {
             "backend": teacher.get("backend", "local"),
@@ -23,7 +27,8 @@ def _teacher_to_driver_cfg(cfg):
             "decoding": teacher.get("decoding", {}),
         },
         "local_backend": cfg.get("local_backend", {"base_url": "http://localhost:11434/v1", "request_timeout_s": 120}),
-        "fallback": cfg.get("fallback", {"enable": True, "mode": "heuristic"}),
+        "fallback": {"enable": enable_fallback, "mode": cfg.get("fallback", {}).get("mode", "heuristic")},
+        "runtime": {"run_mode": mode},
     }
     return out
 
@@ -33,13 +38,14 @@ def main():
     parser.add_argument("--teacher_config", required=True)
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--out", required=True)
+    parser.add_argument("--run_mode", choices=["smoke", "formal"], default="formal")
     args = parser.parse_args()
 
     t_cfg = load_yaml(args.teacher_config)
     rows = load_jsonl(args.dataset)
     validate_records(rows, schema_path("dataset.schema.json"), context_prefix="dataset")
 
-    driver_cfg = _teacher_to_driver_cfg(t_cfg)
+    driver_cfg = _teacher_to_driver_cfg(t_cfg, run_mode=args.run_mode)
     driver = LocalLLMDriver(driver_cfg)
 
     distilled, stats = distill_controller_dataset(rows, t_cfg, driver)

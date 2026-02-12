@@ -10,19 +10,30 @@ class LocalLLMDriver(object):
         model_cfg = self.cfg.get("model", {})
         local_cfg = self.cfg.get("local_backend", {})
         fb_cfg = self.cfg.get("fallback", {})
+        runtime_cfg = self.cfg.get("runtime", {})
 
         self.model = model_cfg.get("name_or_path", "qwen3:8b")
         self.base_url = local_cfg.get("base_url", "http://localhost:11434/v1")
         self.timeout = int(local_cfg.get("request_timeout_s", 120))
+        self.run_mode = str(runtime_cfg.get("run_mode", "formal")).lower()
         self.fallback_enable = bool(
             fb_cfg.get("enable", local_cfg.get("use_mock_if_unavailable", True))
         )
         self.fallback_mode = fb_cfg.get("mode", "heuristic")
         self._last_error = ""
+        self._last_backend_mode = "unknown"
 
     @property
     def last_error(self):
         return self._last_error
+
+    @property
+    def backend_mode(self):
+        return self._last_backend_mode
+
+    @property
+    def mock_allowed(self):
+        return self.run_mode == "smoke" and self.fallback_enable
 
     def generate(
         self,
@@ -44,11 +55,19 @@ class LocalLLMDriver(object):
             max_new_tokens=max_new_tokens,
         )
         if content is not None:
+            self._last_backend_mode = "real"
             return content
 
-        if not self.fallback_enable:
-            raise RuntimeError("Local backend unavailable and fallback disabled: {}".format(self._last_error))
+        if not self.mock_allowed:
+            if self.run_mode == "formal":
+                raise RuntimeError(
+                    "Local backend unavailable in formal mode: {}".format(self._last_error or "unknown error")
+                )
+            raise RuntimeError(
+                "Local backend unavailable and fallback disabled: {}".format(self._last_error or "unknown error")
+            )
 
+        self._last_backend_mode = "mock"
         return self._mock_generate(prompt, expect_protocol=expect_protocol)
 
     def _generate_remote(self, prompt, system_prompt, temperature, max_new_tokens):

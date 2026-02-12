@@ -26,6 +26,7 @@ fallback:
 retrieval:
   embedding_model: "sentence-transformers"   # or Qwen/Qwen3-Embedding-0.6B
   index: "faiss"
+  sample_index: "lexical"
   chunk_size: 512
   chunk_overlap: 128
   top_k_init: 3

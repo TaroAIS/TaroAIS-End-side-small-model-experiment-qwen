@@ -5,6 +5,7 @@ from pathlib import Path
 from agent.edge_reasoning_agent import EdgeReasoningAgent
 from llm.driver_hf import HFLLMDriver
 from llm.driver_local import LocalLLMDriver
+from retrieval.chunking import build_chunks_from_documents
 from retrieval.index_faiss import RetrievalIndex, build_and_save_index
 from utils.io import dump_jsonl, load_jsonl, load_yaml
 from utils.metadata import snapshot_configs, write_run_metadata
@@ -50,33 +51,71 @@ def _load_or_build_index(cfg, dataset_rows, index_dir):
     return idx
 
 
+def _build_sample_index(sample, retrieval_cfg):
+    chunk_size = int(retrieval_cfg.get("chunk_size", 512))
+    chunk_overlap = int(retrieval_cfg.get("chunk_overlap", 128))
+    emb_model = retrieval_cfg.get("embedding_model", "sentence-transformers")
+    index_type = retrieval_cfg.get("sample_index", "lexical")
+    docs = sample.get("documents", [])
+    chunks = build_chunks_from_documents(
+        docs,
+        sample_id=sample.get("id", "sample"),
+        chunk_size=chunk_size,
+        overlap=chunk_overlap,
+    )
+    idx = RetrievalIndex(embedding_model=emb_model, index_type=index_type)
+    idx.build(chunks)
+    return idx
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run edge reasoning agent and write prediction JSONL.")
     parser.add_argument("--config", required=True)
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--index_dir", default="data/index")
+    parser.add_argument("--run_mode", choices=["smoke", "formal"], default="formal")
+    parser.add_argument("--retrieval_scope", choices=["sample", "global"], default="sample")
     args = parser.parse_args()
 
     cfg = load_yaml(args.config)
+    cfg = dict(cfg)
+    cfg["runtime"] = {"run_mode": args.run_mode}
+
     rows = load_jsonl(args.dataset)
     validate_records(rows, schema_path("dataset.schema.json"), context_prefix="dataset")
 
     driver = _build_driver(cfg)
-    index = _load_or_build_index(cfg, rows, args.index_dir)
+
+    global_index = None
+    if args.retrieval_scope == "global":
+        global_index = _load_or_build_index(cfg, rows, args.index_dir)
 
     run_dir = create_run_dir(base_dir="results")
     trace_dir = Path(run_dir) / "trace"
     save_trace = bool(cfg.get("logging", {}).get("save_trace", True))
-
-    agent = EdgeReasoningAgent(cfg=cfg, llm_driver=driver, retrieval_index=index)
+    retrieval_cfg = cfg.get("retrieval", {})
 
     results = []
     for sample in rows:
+        if args.retrieval_scope == "sample":
+            idx = _build_sample_index(sample, retrieval_cfg)
+        else:
+            idx = global_index
+        agent = EdgeReasoningAgent(cfg=cfg, llm_driver=driver, retrieval_index=idx)
+
         trace_path = None
         if save_trace:
             trace_path = trace_dir / "{}.json".format(sample.get("id", "sample"))
         result, _trace = agent.run_sample(sample, trace_path=trace_path)
+        if "backend_mode" not in result:
+            result["backend_mode"] = getattr(driver, "backend_mode", "unknown")
+        if args.run_mode == "formal" and result.get("backend_mode") != "real":
+            raise RuntimeError(
+                "Formal mode requires real backend output, got backend_mode={}".format(
+                    result.get("backend_mode")
+                )
+            )
         results.append(result)
 
     validate_records(results, schema_path("result.schema.json"), context_prefix="result")
@@ -92,6 +131,10 @@ def main():
         "n_ctx": int(model_cfg.get("n_ctx", cfg.get("agent", {}).get("max_prompt_tokens", 8192))),
         "n_gpu_layers": int(model_cfg.get("n_gpu_layers", 0)),
     }
+    source_meta_path = project_root() / "data" / "minilongbench_source.json"
+    dataset_source_meta_path = ""
+    if source_meta_path.exists():
+        dataset_source_meta_path = str(source_meta_path)
     write_run_metadata(
         run_dir=run_dir,
         schema_path=schema_path("run_metadata.schema.json"),
@@ -99,7 +142,9 @@ def main():
         model_info=model_info,
         hardware=detect_hardware(),
         seed=42,
-        repo_dir=project_root().parent,
+        repo_dir=project_root(),
+        run_mode=args.run_mode,
+        dataset_source_meta_path=dataset_source_meta_path,
     )
 
     print("agent done: {} samples -> {}".format(len(results), args.out))

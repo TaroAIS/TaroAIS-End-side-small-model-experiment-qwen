@@ -4,9 +4,13 @@ from llm.driver_local import LocalLLMDriver
 class HFLLMDriver(object):
     def __init__(self, cfg):
         self.cfg = cfg or {}
+        runtime_cfg = self.cfg.get("runtime", {})
+        self.run_mode = str(runtime_cfg.get("run_mode", "formal")).lower()
         self._fallback = LocalLLMDriver(cfg)
         self._pipe = None
         self._load_error = ""
+        self._last_backend_mode = "unknown"
+        self._last_error = ""
         self._try_load()
 
     def _try_load(self):
@@ -22,6 +26,17 @@ class HFLLMDriver(object):
         except Exception as exc:
             self._pipe = None
             self._load_error = str(exc)
+            self._last_error = self._load_error
+
+    @property
+    def backend_mode(self):
+        return self._last_backend_mode
+
+    @property
+    def last_error(self):
+        if self._last_error:
+            return self._last_error
+        return self._load_error
 
     def generate(
         self,
@@ -32,13 +47,17 @@ class HFLLMDriver(object):
         expect_protocol=False,
     ):
         if self._pipe is None:
-            return self._fallback.generate(
+            if self.run_mode == "formal":
+                raise RuntimeError("HF backend unavailable in formal mode: {}".format(self._load_error or "unknown error"))
+            text = self._fallback.generate(
                 prompt,
                 system_prompt=system_prompt,
                 temperature=temperature,
                 max_new_tokens=max_new_tokens,
                 expect_protocol=expect_protocol,
             )
+            self._last_backend_mode = self._fallback.backend_mode
+            return text
 
         text = prompt if not system_prompt else system_prompt + "\n\n" + prompt
         if temperature is None:
@@ -59,18 +78,20 @@ class HFLLMDriver(object):
             if gen.startswith(text):
                 gen = gen[len(text) :]
             gen = gen.strip()
-            return gen or self._fallback.generate(
+            if gen:
+                self._last_backend_mode = "real"
+                return gen
+            raise RuntimeError("empty generation text")
+        except Exception as exc:
+            self._last_error = str(exc)
+            if self.run_mode == "formal":
+                raise RuntimeError("HF inference failed in formal mode: {}".format(self._last_error))
+            fb_text = self._fallback.generate(
                 prompt,
                 system_prompt=system_prompt,
                 temperature=temperature,
                 max_new_tokens=max_new_tokens,
                 expect_protocol=expect_protocol,
             )
-        except Exception:
-            return self._fallback.generate(
-                prompt,
-                system_prompt=system_prompt,
-                temperature=temperature,
-                max_new_tokens=max_new_tokens,
-                expect_protocol=expect_protocol,
-            )
+            self._last_backend_mode = self._fallback.backend_mode
+            return fb_text

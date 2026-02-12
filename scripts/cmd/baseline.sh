@@ -6,4 +6,6 @@ source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
   --config configs/baseline_rag.yaml \
   --dataset data/minilongbench_test.jsonl \
   --index_dir data/index \
-  --out results/baseline_rag.jsonl
+  --out results/baseline_rag.jsonl \
+  --run_mode "$RUN_MODE" \
+  --retrieval_scope "$RETRIEVAL_SCOPE"

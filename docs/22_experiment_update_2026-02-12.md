@@ -52,3 +52,29 @@
 - 当前代码允许在无 GPU / 无 Ollama 场景下用 fallback 跑通流程。
 - Student 训练默认是兼容型 placeholder 路径（确保流程可执行）。
 - 如要真实训练与真实推理，请在有完整依赖和模型后端的环境运行。
+
+## 7) 本次可信化优化（formal/smoke 分离）
+- 新增 `run_mode` 贯穿主脚本：`smoke|formal`
+  - `smoke`：允许 fallback/mock，仅用于链路验证
+  - `formal`：禁止 mock，后端不可用直接失败
+- 新增 `retrieval_scope`：`sample|global`，默认 `sample`
+  - 主实验固定 `sample`（样本内检索）
+  - `global` 保留为扩展实验
+- 新增 `scripts/cmd/preflight_formal.sh`：
+  - 检查 HF 数据可达、真实后端可达、`matplotlib/pandas` 可用
+- `scripts/cmd/all.sh` 调整为 formal 严格链路：
+  - `preflight -> prepare_remote_strict -> index -> baseline -> agent -> eval -> ablations -> distill -> train_student -> eval_student`
+
+## 8) 指标与元数据增强
+- `result` 新增可选字段：
+  - `backend_mode`（`real|mock|unknown`）
+  - `prompt_tokens_total`
+  - `completion_tokens_total`
+  - `retrieved_chunks_total`
+- `run_metadata` 新增可选字段：
+  - `run_mode`
+  - `dataset_source_meta_path`
+- `report/metrics_table.csv` 新增成本列：
+  - `avg_retrieved_chunks_total`
+  - `avg_prompt_tokens_total`
+  - `avg_completion_tokens_total`

@@ -9,6 +9,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from agent.edge_reasoning_agent import EdgeReasoningAgent
+from agent.prompts import build_agent_prompt, format_evidence_chunks
+from llm.driver_hf import HFLLMDriver
 from llm.driver_local import LocalLLMDriver
 from metrics.qa_metrics import best_over_gold
 from retrieval.chunking import build_chunks_from_documents
@@ -27,6 +29,29 @@ def _keyword_from_question(question):
     return " ".join(toks[:4]) if toks else "关键信息"
 
 
+def _build_driver(cfg):
+    backend = cfg.get("model", {}).get("backend", "local")
+    if backend == "hf":
+        return HFLLMDriver(cfg)
+    return LocalLLMDriver(cfg)
+
+
+def _teacher_controller_from_driver(driver):
+    def controller(question, evidence, step, max_steps, sample):
+        prompt = build_agent_prompt(
+            question=question,
+            evidence_text=evidence,
+            step=step,
+            max_steps=max_steps,
+            memory_strategy="fact_memory",
+            note="teacher_behavior_eval",
+            facts_text="",
+        )
+        return driver.generate(prompt, expect_protocol=True)
+
+    return controller
+
+
 def _student_controller_from_checkpoint(checkpoint_dir):
     rules_path = Path(checkpoint_dir) / "student_controller_rules.json"
     rules = {}
@@ -36,12 +61,20 @@ def _student_controller_from_checkpoint(checkpoint_dir):
         except Exception:
             rules = {}
 
+    fitted = rules.get("fitted_stats", {})
+    by_task = fitted.get("by_task_policy", {}) if isinstance(fitted, dict) else {}
+
     def controller(question, evidence, step, max_steps, sample):
         task = sample.get("task", "")
         if step >= max_steps:
             best = (evidence or "").strip().split("\n")
             ans = best[0] if best and best[0] else "信息不足"
             return "<final>{}</final>".format(ans[:200])
+
+        if task in by_task:
+            action = by_task[task].get("default_action", "final")
+            if action == "search" and step == 1:
+                return "<search>{}</search>".format(_keyword_from_question(question))
 
         if task == "multi_doc_qa" and step == 1:
             return "<search>{}</search>".format(_keyword_from_question(question))
@@ -93,11 +126,17 @@ def _control_eval(dataset_rows, controller_fn):
     for s in dataset_rows:
         gold_tag = "search" if s.get("task") == "multi_doc_qa" else "final"
         docs = s.get("documents", [])
-        chunks = build_chunks_from_documents(docs, sample_id=s.get("id", "sample"), chunk_size=512, overlap=128)
+        chunks = build_chunks_from_documents(
+            docs, sample_id=s.get("id", "sample"), chunk_size=512, overlap=128
+        )
         idx = RetrievalIndex(index_type="lexical")
         idx.build(chunks)
 
-        evidence = "\n".join([d.get("text", "") for d in docs])
+        evidence_chunks = idx.search(s.get("question", ""), top_k=3)
+        evidence = format_evidence_chunks(
+            evidence_chunks,
+            injection_cfg={"enable": False, "quote_chunks": False, "label_as_evidence": False},
+        )
         out = controller_fn(
             question=s.get("question", ""),
             evidence=evidence,
@@ -105,9 +144,8 @@ def _control_eval(dataset_rows, controller_fn):
             max_steps=4,
             sample=s,
         )
-        pred_tag = "final"
         keyword = ""
-        m = re.search(r"<search>(.*?)</search>", out, flags=re.S | re.I)
+        m = re.match(r"^\s*<search>(.*?)</search>\s*$", (out or "").strip(), flags=re.S | re.I)
         if m:
             pred_tag = "search"
             keyword = m.group(1).strip()
@@ -135,7 +173,7 @@ def _control_eval(dataset_rows, controller_fn):
 
 
 def _end2end_eval(dataset_rows, agent_cfg, controller_fn=None):
-    driver = LocalLLMDriver(agent_cfg)
+    driver = _build_driver(agent_cfg)
     idx_dir = project_root() / "data" / "student_eval_index"
     out_chunk = idx_dir / "chunks.jsonl"
     _, index = build_and_save_index(
@@ -180,22 +218,29 @@ def main():
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--checkpoint", default="checkpoints/student")
     parser.add_argument("--out_dir", default="report_student")
+    parser.add_argument("--run_mode", choices=["smoke", "formal"], default="formal")
     args = parser.parse_args()
 
     ensure_dir(args.out_dir)
 
     agent_cfg = load_yaml(args.agent_config)
+    agent_cfg = dict(agent_cfg)
+    agent_cfg["runtime"] = {"run_mode": args.run_mode}
     rows = load_jsonl(args.dataset)
     validate_records(rows, schema_path("dataset.schema.json"), context_prefix="dataset")
 
-    controller_fn, rules = _student_controller_from_checkpoint(args.checkpoint)
+    teacher_driver = _build_driver(agent_cfg)
+    teacher_controller = _teacher_controller_from_driver(teacher_driver)
+    student_controller_fn, rules = _student_controller_from_checkpoint(args.checkpoint)
 
-    behavior = _control_eval(rows, controller_fn)
+    teacher_behavior = _control_eval(rows, teacher_controller)
+    student_behavior = _control_eval(rows, student_controller_fn)
     teacher_e2e = _end2end_eval(rows, agent_cfg, controller_fn=None)
-    student_e2e = _end2end_eval(rows, agent_cfg, controller_fn=controller_fn)
+    student_e2e = _end2end_eval(rows, agent_cfg, controller_fn=student_controller_fn)
 
     summary = {
-        "behavior": behavior,
+        "teacher_behavior": teacher_behavior,
+        "student_behavior": student_behavior,
         "teacher_e2e": {
             "f1": teacher_e2e["f1"],
             "em": teacher_e2e["em"],
@@ -207,6 +252,15 @@ def main():
             "em": student_e2e["em"],
             "avg_retrieval": student_e2e["avg_retrieval"],
             "avg_latency_ms": student_e2e["avg_latency_ms"],
+        },
+        "delta_student_minus_teacher": {
+            "f1": student_e2e["f1"] - teacher_e2e["f1"],
+            "avg_retrieval": student_e2e["avg_retrieval"] - teacher_e2e["avg_retrieval"],
+            "avg_latency_ms": student_e2e["avg_latency_ms"] - teacher_e2e["avg_latency_ms"],
+            "trigger_acc": student_behavior["trigger_acc"] - teacher_behavior["trigger_acc"],
+            "macro_f1": student_behavior["macro_f1"] - teacher_behavior["macro_f1"],
+            "keyword_hit_rate": student_behavior["keyword_hit_rate"]
+            - teacher_behavior["keyword_hit_rate"],
         },
         "checkpoint_rules": rules,
     }
@@ -227,9 +281,12 @@ def main():
             "em": teacher_e2e["em"],
             "avg_retrieval": teacher_e2e["avg_retrieval"],
             "avg_latency_ms": teacher_e2e["avg_latency_ms"],
-            "trigger_acc": behavior["trigger_acc"],
-            "macro_f1": behavior["macro_f1"],
-            "keyword_hit_rate": behavior["keyword_hit_rate"],
+            "trigger_acc": teacher_behavior["trigger_acc"],
+            "macro_f1": teacher_behavior["macro_f1"],
+            "keyword_hit_rate": teacher_behavior["keyword_hit_rate"],
+            "delta_f1_vs_teacher": 0.0,
+            "delta_latency_vs_teacher": 0.0,
+            "delta_retrieval_vs_teacher": 0.0,
         },
         {
             "model": "student_controller",
@@ -237,9 +294,12 @@ def main():
             "em": student_e2e["em"],
             "avg_retrieval": student_e2e["avg_retrieval"],
             "avg_latency_ms": student_e2e["avg_latency_ms"],
-            "trigger_acc": behavior["trigger_acc"],
-            "macro_f1": behavior["macro_f1"],
-            "keyword_hit_rate": behavior["keyword_hit_rate"],
+            "trigger_acc": student_behavior["trigger_acc"],
+            "macro_f1": student_behavior["macro_f1"],
+            "keyword_hit_rate": student_behavior["keyword_hit_rate"],
+            "delta_f1_vs_teacher": student_e2e["f1"] - teacher_e2e["f1"],
+            "delta_latency_vs_teacher": student_e2e["avg_latency_ms"] - teacher_e2e["avg_latency_ms"],
+            "delta_retrieval_vs_teacher": student_e2e["avg_retrieval"] - teacher_e2e["avg_retrieval"],
         },
     ]
 

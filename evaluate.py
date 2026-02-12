@@ -21,14 +21,18 @@ def _safe_float(v):
         return 0.0
 
 
-def evaluate_one(gold_map, pred_rows):
+def evaluate_one(gold_map, pred_rows, run_mode):
     ems = []
     f1s = []
     lat = []
     steps = []
     retr = []
+    prompt_tokens = []
+    completion_tokens = []
+    retrieved_chunks = []
     gpu_peak = []
     gpu_mean = []
+    backend_modes = set()
     oom = 0
     error_cases = []
 
@@ -45,9 +49,22 @@ def evaluate_one(gold_map, pred_rows):
         steps.append(int(row.get("n_steps", 1)))
         retr.append(int(row.get("n_retrieval", 0)))
 
+        prompt_tokens.append(_safe_float(row.get("prompt_tokens_total", 0.0)))
+        completion_tokens.append(_safe_float(row.get("completion_tokens_total", 0.0)))
+        retrieved_chunks.append(_safe_float(row.get("retrieved_chunks_total", 0.0)))
+
         gm = row.get("gpu_mem_mb", {})
         gpu_peak.append(_safe_float(gm.get("peak", 0.0)))
         gpu_mean.append(_safe_float(gm.get("mean", 0.0)))
+
+        backend_mode = str(row.get("backend_mode", "unknown"))
+        backend_modes.add(backend_mode)
+        if run_mode == "formal" and backend_mode != "real":
+            raise RuntimeError(
+                "Formal mode requires backend_mode=real. got id={} backend_mode={}".format(
+                    sid, backend_mode
+                )
+            )
 
         if int(row.get("error_count", 0)) > 0:
             oom += 1
@@ -63,11 +80,21 @@ def evaluate_one(gold_map, pred_rows):
             )
 
     n = float(len(pred_rows)) if pred_rows else 1.0
+    if len(backend_modes) == 1:
+        backend_mode = list(backend_modes)[0]
+    elif not backend_modes:
+        backend_mode = "unknown"
+    else:
+        backend_mode = "mixed"
     return {
+        "backend_mode": backend_mode,
         "em": sum(ems) / n,
         "f1": sum(f1s) / n,
         "avg_steps": sum(steps) / n,
         "avg_retrieval": sum(retr) / n,
+        "avg_retrieved_chunks_total": sum(retrieved_chunks) / n,
+        "avg_prompt_tokens_total": sum(prompt_tokens) / n,
+        "avg_completion_tokens_total": sum(completion_tokens) / n,
         "p50_latency_ms": percentile(lat, 50),
         "p95_latency_ms": percentile(lat, 95),
         "gpu_peak_mb": max(gpu_peak) if gpu_peak else 0.0,
@@ -77,27 +104,32 @@ def evaluate_one(gold_map, pred_rows):
     }
 
 
-def _save_figures(df, out_dir):
+def _write_placeholder_figures(out_dir):
+    import base64
+
+    pixel = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2Y6XQAAAAASUVORK5CYII="
+    )
+    for name in [
+        "accuracy_bar.png",
+        "cost_effect_curve.png",
+        "retrieval_effect_curve.png",
+        "gpu_mem_curve.png",
+    ]:
+        (Path(out_dir) / name).write_bytes(pixel)
+
+
+def _save_figures(df, out_dir, run_mode, warnings):
     ensure_dir(out_dir)
     try:
         import matplotlib.pyplot as plt
-    except Exception:
-        # Keep pipeline alive in minimal environments.
-        import base64
-
-        pixel = base64.b64decode(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2Y6XQAAAAASUVORK5CYII="
-        )
-        for name in [
-            "accuracy_bar.png",
-            "cost_effect_curve.png",
-            "retrieval_effect_curve.png",
-            "gpu_mem_curve.png",
-        ]:
-            (Path(out_dir) / name).write_bytes(pixel)
+    except Exception as exc:
+        if run_mode == "formal":
+            raise RuntimeError("matplotlib is required in formal mode: {}".format(exc))
+        _write_placeholder_figures(out_dir)
+        warnings.append("matplotlib unavailable, wrote placeholder figures.")
         return
 
-    # accuracy_bar.png
     plt.figure(figsize=(8, 4))
     plt.bar(df["method"], df["f1"], color="#2E7D32")
     for i, v in enumerate(df["f1"].tolist()):
@@ -108,7 +140,6 @@ def _save_figures(df, out_dir):
     plt.savefig(Path(out_dir) / "accuracy_bar.png", dpi=150)
     plt.close()
 
-    # cost_effect_curve.png
     plt.figure(figsize=(6, 5))
     plt.scatter(df["p95_latency_ms"], df["f1"], c="#1565C0")
     for _, row in df.iterrows():
@@ -119,7 +150,6 @@ def _save_figures(df, out_dir):
     plt.savefig(Path(out_dir) / "cost_effect_curve.png", dpi=150)
     plt.close()
 
-    # retrieval_effect_curve.png
     plt.figure(figsize=(6, 5))
     plt.scatter(df["avg_retrieval"], df["f1"], c="#EF6C00")
     for _, row in df.iterrows():
@@ -130,7 +160,6 @@ def _save_figures(df, out_dir):
     plt.savefig(Path(out_dir) / "retrieval_effect_curve.png", dpi=150)
     plt.close()
 
-    # gpu_mem_curve.png
     plt.figure(figsize=(8, 4))
     plt.plot(df["method"], df["gpu_peak_mb"], marker="o", label="peak")
     plt.plot(df["method"], df["gpu_mean_mb"], marker="s", label="mean")
@@ -147,6 +176,7 @@ def main():
     parser.add_argument("--gold", required=True)
     parser.add_argument("--pred", nargs="+", required=True)
     parser.add_argument("--out_dir", required=True)
+    parser.add_argument("--run_mode", choices=["smoke", "formal"], default="formal")
     args = parser.parse_args()
 
     ensure_dir(args.out_dir)
@@ -161,15 +191,19 @@ def main():
     for pred_path in args.pred:
         pred_rows = load_jsonl(pred_path)
         validate_records(pred_rows, schema_path("result.schema.json"), context_prefix="pred")
-        mt = evaluate_one(gold_map, pred_rows)
+        mt = evaluate_one(gold_map, pred_rows, args.run_mode)
         method = _method_name(pred_path)
 
         row = {
             "method": method,
+            "backend_mode": mt["backend_mode"],
             "em": mt["em"],
             "f1": mt["f1"],
             "avg_steps": mt["avg_steps"],
             "avg_retrieval": mt["avg_retrieval"],
+            "avg_retrieved_chunks_total": mt["avg_retrieved_chunks_total"],
+            "avg_prompt_tokens_total": mt["avg_prompt_tokens_total"],
+            "avg_completion_tokens_total": mt["avg_completion_tokens_total"],
             "p50_latency_ms": mt["p50_latency_ms"],
             "p95_latency_ms": mt["p95_latency_ms"],
             "gpu_peak_mb": mt["gpu_peak_mb"],
@@ -198,13 +232,14 @@ def main():
 
     try:
         import pandas as pd
-    except Exception:
+    except Exception as exc:
+        if args.run_mode == "formal":
+            raise RuntimeError("pandas is required in formal mode: {}".format(exc))
         pd = None
 
     if pd is not None:
         df = pd.DataFrame(metrics_rows)
     else:
-        # lightweight fallback table object for minimal runtime.
         class _MiniDF(object):
             def __init__(self, rows):
                 self.rows = rows
@@ -237,12 +272,17 @@ def main():
                         w.writerow(r)
 
         df = _MiniDF(metrics_rows)
+
     order = [
         "method",
+        "backend_mode",
         "em",
         "f1",
         "avg_steps",
         "avg_retrieval",
+        "avg_retrieved_chunks_total",
+        "avg_prompt_tokens_total",
+        "avg_completion_tokens_total",
         "p50_latency_ms",
         "p95_latency_ms",
         "gpu_peak_mb",
@@ -282,7 +322,10 @@ def main():
     if all_error_cases:
         dump_jsonl(Path(args.out_dir) / "error_cases.jsonl", all_error_cases)
 
-    _save_figures(df, args.out_dir)
+    warnings = []
+    _save_figures(df, args.out_dir, args.run_mode, warnings)
+    if warnings:
+        (Path(args.out_dir) / "_warnings.txt").write_text("\n".join(warnings) + "\n", encoding="utf-8")
     print("report generated at {}".format(args.out_dir))
 
 

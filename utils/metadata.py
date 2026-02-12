@@ -11,13 +11,24 @@ from utils.schema import validate_record
 
 
 def _get_git_commit(repo_dir):
-    try:
-        out = subprocess.check_output(
-            ["git", "-C", str(repo_dir), "rev-parse", "HEAD"], stderr=subprocess.DEVNULL
-        )
-        return out.decode("utf-8").strip()
-    except Exception:
-        return "unknown"
+    candidates = []
+    if repo_dir:
+        candidates.append(Path(repo_dir))
+    candidates.extend([Path.cwd(), Path(__file__).resolve().parents[1]])
+    seen = set()
+    for c in candidates:
+        cp = str(c.resolve())
+        if cp in seen:
+            continue
+        seen.add(cp)
+        try:
+            out = subprocess.check_output(
+                ["git", "-C", cp, "rev-parse", "HEAD"], stderr=subprocess.DEVNULL
+            )
+            return out.decode("utf-8").strip()
+        except Exception:
+            continue
+    return "unknown"
 
 
 def _get_ram_gb():
@@ -45,6 +56,8 @@ def write_run_metadata(
     seed=42,
     notes="",
     repo_dir=".",
+    run_mode="formal",
+    dataset_source_meta_path="",
 ):
     run_dir = Path(run_dir)
     ensure_dir(run_dir)
@@ -63,7 +76,10 @@ def write_run_metadata(
         },
         "seeds": _seed_values(seed),
         "notes": notes,
+        "run_mode": str(run_mode),
     }
+    if dataset_source_meta_path:
+        metadata["dataset_source_meta_path"] = str(dataset_source_meta_path)
     from utils.io import read_json
 
     schema = read_json(schema_path)

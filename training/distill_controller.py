@@ -34,6 +34,19 @@ def _repair_output(raw_output, question, driver):
     return driver.generate(prompt, expect_protocol=True)
 
 
+def _evidence_summary(docs, max_docs=2, max_chars=180):
+    if not docs:
+        return ""
+    lines = []
+    for d in docs[: max(1, int(max_docs))]:
+        doc_id = d.get("doc_id", "")
+        text = (d.get("text", "") or "").strip()
+        if len(text) > max_chars:
+            text = text[:max_chars] + "..."
+        lines.append("[{}] {}".format(doc_id, text))
+    return "\n".join(lines)
+
+
 def distill_controller_dataset(dataset_rows, teacher_cfg, driver):
     distill_cfg = teacher_cfg.get("distill", {})
     quality_cfg = distill_cfg.get("quality", {})
@@ -46,6 +59,9 @@ def distill_controller_dataset(dataset_rows, teacher_cfg, driver):
     n_invalid = 0
     n_repaired = 0
     n_dropped = 0
+    search_count = 0
+    final_count = 0
+    task_distribution = {}
 
     for sample in dataset_rows:
         sid = sample.get("id", "")
@@ -83,14 +99,26 @@ def distill_controller_dataset(dataset_rows, teacher_cfg, driver):
             tag = "final"
             content = "信息不足"
 
+        if tag == "search":
+            search_count += 1
+        if tag == "final":
+            final_count += 1
+
+        task = sample.get("task", "unknown")
+        task_distribution[task] = int(task_distribution.get(task, 0)) + 1
+
         output = "<{}>{}</{}>".format(tag, content.strip(), tag)
+        evidence_summary = _evidence_summary(docs)
         train_row = {
             "id": sid,
-            "task": sample.get("task", ""),
+            "task": task,
             "question": question,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": question},
+                {
+                    "role": "user",
+                    "content": "Question:\n{}\n\nEvidenceSummary:\n{}".format(question, evidence_summary),
+                },
             ],
             "output": output,
             "meta": {
@@ -107,5 +135,8 @@ def distill_controller_dataset(dataset_rows, teacher_cfg, driver):
         "invalid_rate": n_invalid / total,
         "repaired_rate": n_repaired / total,
         "dropped_rate": n_dropped / total,
+        "search_ratio": search_count / float(len(out_rows) or 1),
+        "final_ratio": final_count / float(len(out_rows) or 1),
+        "task_distribution": task_distribution,
     }
     return out_rows, stats

@@ -24,5 +24,7 @@
     "numpy": 42,
     "torch": 42
   },
-  "notes": ""
+  "notes": "",
+  "run_mode": "formal",
+  "dataset_source_meta_path": "data/minilongbench_source.json"
 }

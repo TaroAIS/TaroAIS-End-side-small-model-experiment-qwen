@@ -8,15 +8,16 @@
 
 ## 快速开始（给你 / 给 Codex）
 1) 把 `codex/codex_prompt.md` 复制给 Codex，让它在新仓库生成完整代码。
-2) 先跑 smoke test（<= 5 分钟）：
-   - `bash scripts/run_smoke.sh`
-3) 再跑 MiniLongBench 全量/子集，并生成论文图表：
-   - `make all`
+2) 先跑 smoke test（<= 5 分钟，允许 mock/fallback）：
+   - `bash scripts/cmd/smoke.sh`
+3) 再跑 formal 主实验（严格模式，禁止 mock）：
+   - `bash scripts/cmd/all.sh`
 
 ### 命令脚本入口（推荐）
 - 目录：`scripts/cmd/`
 - 文档：`scripts/cmd/README.md`
 - 常用：
+  - `bash scripts/cmd/preflight_formal.sh`
   - `bash scripts/cmd/prepare_remote_strict.sh`
   - `bash scripts/cmd/smoke.sh`
   - `bash scripts/cmd/all.sh`
@@ -66,7 +67,8 @@
 ---
 
 ## 你最终需要在仓库里跑通（Definition of Done）
-- `make smoke`（baseline + agent + evaluate 生成 report）
-- `make all`（全量数据：准备->索引->baseline/agent->evaluate->出图）
+- `make smoke`（smoke 链路，允许 fallback）
+- `make all`（formal 链路：`run_mode=formal` + `retrieval_scope=sample`）
 - 输出：`results/*.jsonl`、`report/*.csv`、`report/*.png`
 - 运行稳定：OOM=0；输出文件满足 `schemas/*.json` 校验
+- formal 结果要求：`backend_mode=real`（不接受 mock）

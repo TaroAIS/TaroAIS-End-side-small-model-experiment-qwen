@@ -7,10 +7,18 @@ from agent.prompts import (
     build_agent_prompt,
     build_repair_prompt,
     format_evidence_chunks,
+    format_memory_facts,
     parse_protocol_output,
 )
 from utils.nvml import NvmlMonitor
 from utils.timer import PhaseTimer
+
+
+def _approx_tokens(text):
+    text = text or ""
+    if not text:
+        return 0
+    return max(1, len(text) // 2)
 
 
 class EdgeReasoningAgent(object):
@@ -53,6 +61,9 @@ class EdgeReasoningAgent(object):
         memory.prune_to_budget()
 
         n_retrieval = 1 if init_hits else 0
+        retrieved_chunks_total = len(init_hits)
+        prompt_tokens_total = 0
+        completion_tokens_total = 0
         error_count = 0
         pred = ""
 
@@ -62,14 +73,19 @@ class EdgeReasoningAgent(object):
                 dropped = memory.prune_to_budget()
 
             evidence_text = format_evidence_chunks(memory.chunks, injection_cfg=inject_cfg)
+            facts_text = ""
+            if memory_strategy == "fact_memory":
+                facts_text = format_memory_facts(memory.facts, max_items=facts_per_step)
             prompt = build_agent_prompt(
                 question=question,
                 evidence_text=evidence_text,
                 step=step,
                 max_steps=max_steps,
                 memory_strategy=memory_strategy,
+                facts_text=facts_text,
                 note="budget_tokens={}".format(memory.token_count()),
             )
+            prompt_tokens_total += _approx_tokens(prompt)
 
             if self.controller_fn is not None:
                 with timer.phase("llm"):
@@ -83,16 +99,19 @@ class EdgeReasoningAgent(object):
             else:
                 with timer.phase("llm"):
                     raw = self.llm.generate(prompt, expect_protocol=True)
+            completion_tokens_total += _approx_tokens(raw)
             tag, content = parse_protocol_output(raw)
 
             repaired = False
             if tag is None:
                 repaired = True
+                repair_prompt = build_repair_prompt(
+                    raw_output=raw, question=question, evidence_text=evidence_text
+                )
+                prompt_tokens_total += _approx_tokens(repair_prompt)
                 with timer.phase("llm"):
-                    repaired_raw = self.llm.generate(
-                        build_repair_prompt(raw_output=raw, question=question, evidence_text=evidence_text),
-                        expect_protocol=True,
-                    )
+                    repaired_raw = self.llm.generate(repair_prompt, expect_protocol=True)
+                completion_tokens_total += _approx_tokens(repaired_raw)
                 tag, content = parse_protocol_output(repaired_raw)
                 if tag is None:
                     tag = "final"
@@ -113,6 +132,7 @@ class EdgeReasoningAgent(object):
                 with timer.phase("retrieval"):
                     hits = self.index.search(keyword, top_k=top_k_iter)
                 n_retrieval += 1
+                retrieved_chunks_total += len(hits)
                 memory.add_chunks(hits)
 
                 facts = extract_facts_from_chunks(hits, limit=facts_per_step)
@@ -152,6 +172,10 @@ class EdgeReasoningAgent(object):
             "gpu_mem_mb": gpu_mem,
             "pruning_log": memory.pruning_log,
             "error_count": int(error_count),
+            "prompt_tokens_total": int(prompt_tokens_total),
+            "completion_tokens_total": int(completion_tokens_total),
+            "retrieved_chunks_total": int(retrieved_chunks_total),
+            "backend_mode": getattr(self.llm, "backend_mode", "unknown"),
         }
 
         if trace_path:

@@ -5,6 +5,7 @@ from pathlib import Path
 from agent.prompts import build_baseline_prompt, format_evidence_chunks
 from llm.driver_hf import HFLLMDriver
 from llm.driver_local import LocalLLMDriver
+from retrieval.chunking import build_chunks_from_documents
 from retrieval.index_faiss import RetrievalIndex, build_and_save_index
 from utils.io import dump_jsonl, load_jsonl, load_yaml
 from utils.metadata import snapshot_configs, write_run_metadata
@@ -12,6 +13,13 @@ from utils.nvml import NvmlMonitor
 from utils.runtime import create_run_dir, detect_hardware, project_root, schema_path
 from utils.schema import validate_records
 from utils.timer import PhaseTimer
+
+
+def _approx_tokens(text):
+    text = text or ""
+    if not text:
+        return 0
+    return max(1, len(text) // 2)
 
 
 def _build_driver(cfg):
@@ -52,21 +60,47 @@ def _load_or_build_index(cfg, dataset_rows, index_dir):
     return idx
 
 
+def _build_sample_index(sample, retrieval_cfg):
+    chunk_size = int(retrieval_cfg.get("chunk_size", 512))
+    chunk_overlap = int(retrieval_cfg.get("chunk_overlap", 128))
+    emb_model = retrieval_cfg.get("embedding_model", "sentence-transformers")
+    index_type = retrieval_cfg.get("sample_index", "lexical")
+    docs = sample.get("documents", [])
+    chunks = build_chunks_from_documents(
+        docs,
+        sample_id=sample.get("id", "sample"),
+        chunk_size=chunk_size,
+        overlap=chunk_overlap,
+    )
+    idx = RetrievalIndex(embedding_model=emb_model, index_type=index_type)
+    idx.build(chunks)
+    return idx
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run baseline RAG and write prediction JSONL.")
     parser.add_argument("--config", required=True)
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--index_dir", default="data/index")
+    parser.add_argument("--run_mode", choices=["smoke", "formal"], default="formal")
+    parser.add_argument("--retrieval_scope", choices=["sample", "global"], default="sample")
     args = parser.parse_args()
 
     cfg = load_yaml(args.config)
+    cfg = dict(cfg)
+    cfg["runtime"] = {"run_mode": args.run_mode}
+
     rows = load_jsonl(args.dataset)
     validate_records(rows, schema_path("dataset.schema.json"), context_prefix="dataset")
 
     driver = _build_driver(cfg)
-    index = _load_or_build_index(cfg, rows, args.index_dir)
     top_k = int(cfg.get("retrieval", {}).get("top_k", 5))
+    retrieval_cfg = cfg.get("retrieval", {})
+
+    global_index = None
+    if args.retrieval_scope == "global":
+        global_index = _load_or_build_index(cfg, rows, args.index_dir)
 
     results = []
     for sample in rows:
@@ -77,15 +111,28 @@ def main():
         monitor = NvmlMonitor(sample_ms=cfg.get("logging", {}).get("nvml_sample_ms", 200))
         timer = PhaseTimer()
 
+        sample_index = global_index
+        if args.retrieval_scope == "sample":
+            sample_index = _build_sample_index(sample, retrieval_cfg)
+
         with timer.phase("retrieval"):
-            hits = index.search(q, top_k=top_k)
-        context = format_evidence_chunks(hits, injection_cfg={"enable": False, "quote_chunks": False, "label_as_evidence": False})
+            hits = sample_index.search(q, top_k=top_k)
+        context = format_evidence_chunks(
+            hits,
+            injection_cfg={"enable": False, "quote_chunks": False, "label_as_evidence": False},
+        )
 
         prompt = build_baseline_prompt(q, context)
         with timer.phase("llm"):
             pred = driver.generate(prompt, expect_protocol=False)
 
         monitor.sample()
+        backend_mode = getattr(driver, "backend_mode", "unknown")
+        if args.run_mode == "formal" and backend_mode != "real":
+            raise RuntimeError(
+                "Formal mode requires real backend output, got backend_mode={}".format(backend_mode)
+            )
+
         result = {
             "id": sid,
             "pred": (pred or "").strip(),
@@ -99,6 +146,10 @@ def main():
             },
             "gpu_mem_mb": monitor.summary(),
             "error_count": 0,
+            "backend_mode": backend_mode,
+            "prompt_tokens_total": int(_approx_tokens(prompt)),
+            "completion_tokens_total": int(_approx_tokens(pred)),
+            "retrieved_chunks_total": int(len(hits)),
         }
         monitor.close()
         results.append(result)
@@ -117,6 +168,10 @@ def main():
         "n_ctx": int(model_cfg.get("n_ctx", 8192)),
         "n_gpu_layers": int(model_cfg.get("n_gpu_layers", 0)),
     }
+    source_meta_path = project_root() / "data" / "minilongbench_source.json"
+    dataset_source_meta_path = ""
+    if source_meta_path.exists():
+        dataset_source_meta_path = str(source_meta_path)
     write_run_metadata(
         run_dir=run_dir,
         schema_path=schema_path("run_metadata.schema.json"),
@@ -124,7 +179,9 @@ def main():
         model_info=model_info,
         hardware=detect_hardware(),
         seed=42,
-        repo_dir=project_root().parent,
+        repo_dir=project_root(),
+        run_mode=args.run_mode,
+        dataset_source_meta_path=dataset_source_meta_path,
     )
 
     print("baseline done: {} samples -> {}".format(len(results), args.out))

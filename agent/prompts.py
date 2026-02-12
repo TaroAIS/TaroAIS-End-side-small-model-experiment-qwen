@@ -41,7 +41,22 @@ def build_baseline_prompt(question, context):
     ).format(question, context)
 
 
-def build_agent_prompt(question, evidence_text, step, max_steps, memory_strategy, note=""):
+def format_memory_facts(facts, max_items=6):
+    if not facts:
+        return ""
+    lines = []
+    for fact in facts[: max(1, int(max_items))]:
+        content = (fact.get("content", "") or "").strip()
+        ev = fact.get("evidence", {}) or {}
+        doc_id = ev.get("doc_id", "")
+        chunk_id = ev.get("chunk_id", "")
+        if not content:
+            continue
+        lines.append("- {} ({}#{})".format(content, doc_id, chunk_id))
+    return "\n".join(lines)
+
+
+def build_agent_prompt(question, evidence_text, step, max_steps, memory_strategy, note="", facts_text=""):
     return (
         "你是端侧检索推理代理。你必须严格按协议输出：\n"
         "- 信息不足：<search>关键词</search>\n"
@@ -52,8 +67,9 @@ def build_agent_prompt(question, evidence_text, step, max_steps, memory_strategy
         "[MEMORY_STRATEGY]\n{}\n[/MEMORY_STRATEGY]\n"
         "[QUESTION]\n{}\n[/QUESTION]\n"
         "[EVIDENCE]\n{}\n[/EVIDENCE]\n"
+        "[FACTS]\n{}\n[/FACTS]\n"
         "[NOTE]\n{}\n[/NOTE]\n"
-    ).format(step, max_steps, memory_strategy, question, evidence_text, note)
+    ).format(step, max_steps, memory_strategy, question, evidence_text, facts_text, note)
 
 
 def build_repair_prompt(raw_output, question, evidence_text):
@@ -69,10 +85,13 @@ def build_repair_prompt(raw_output, question, evidence_text):
 
 def parse_protocol_output(text):
     text = (text or "").strip()
-    m_final = re.search(r"<final>(.*?)</final>", text, flags=re.S | re.I)
+    m_final = re.match(r"^\s*<final>(.*?)</final>\s*$", text, flags=re.S | re.I)
+    m_search = re.match(r"^\s*<search>(.*?)</search>\s*$", text, flags=re.S | re.I)
+
+    if bool(m_final) == bool(m_search):
+        return None, ""
     if m_final:
-        return "final", m_final.group(1).strip()
-    m_search = re.search(r"<search>(.*?)</search>", text, flags=re.S | re.I)
+        return "final", (m_final.group(1) or "").strip()
     if m_search:
-        return "search", m_search.group(1).strip()
+        return "search", (m_search.group(1) or "").strip()
     return None, ""
