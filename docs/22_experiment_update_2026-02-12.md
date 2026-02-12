@@ -78,3 +78,34 @@
   - `avg_retrieved_chunks_total`
   - `avg_prompt_tokens_total`
   - `avg_completion_tokens_total`
+
+## 9) 关键任务结论增强（多任务子集 + 95%CI + 门槛判定）
+- `evaluate.py` 新增参数：
+  - `--task_breakdown/--no_task_breakdown`
+  - `--key_tasks`（默认 `multi_doc_qa code_qa`）
+  - `--key_agg`（`macro|micro`，默认 `macro`）
+  - `--run_tag`（用于 seed 标识）
+- `evaluate.py` 新增产物：
+  - `task_metrics.csv`（按任务）
+  - `key_task_summary.csv`（关键任务聚合）
+- 新增 `scripts/cmd/bench_key_tasks.sh`：
+  - 默认 seeds：`42 123 2026`
+  - 每个 seed 输出到 `report_key/seed_<seed>/`
+  - 自动汇总 `95%CI` 与门槛判定
+- 新增 `scripts/aggregate_seed_runs.py`：
+  - 输出：
+    - `report_key/seed_aggregate.csv`（mean/std/95%CI）
+    - `report_key/decision_gate.json`（pass/fail + reasons）
+- 门槛默认值（中等严格）：
+  - `delta_f1_key >= 0.03`
+  - `latency_ratio <= 1.5`
+  - `retrieval_ratio <= 1.8`
+
+## 10) Student 关键任务对齐
+- `scripts/eval_student_controller.py` 增加关键任务切片可选开关：
+  - `--task_breakdown`
+  - `--key_tasks`
+  - `--key_agg`
+- 新增 student 产物：
+  - `report_student/student_task_metrics.csv`
+  - `report_student/student_key_task_summary.csv`

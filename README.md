@@ -12,6 +12,8 @@
    - `bash scripts/cmd/smoke.sh`
 3) 再跑 formal 主实验（严格模式，禁止 mock）：
    - `bash scripts/cmd/all.sh`
+4) 关键任务结论（多 seed + 95%CI + 成本门槛）：
+   - `bash scripts/cmd/bench_key_tasks.sh`
 
 ### 命令脚本入口（推荐）
 - 目录：`scripts/cmd/`
@@ -21,6 +23,7 @@
   - `bash scripts/cmd/prepare_remote_strict.sh`
   - `bash scripts/cmd/smoke.sh`
   - `bash scripts/cmd/all.sh`
+  - `bash scripts/cmd/bench_key_tasks.sh`
 
 ---
 
@@ -72,3 +75,17 @@
 - 输出：`results/*.jsonl`、`report/*.csv`、`report/*.png`
 - 运行稳定：OOM=0；输出文件满足 `schemas/*.json` 校验
 - formal 结果要求：`backend_mode=real`（不接受 mock）
+
+## 关键任务结论实验（建议用于论文主结论）
+- 关键任务默认：`multi_doc_qa + code_qa`
+- 关键任务聚合默认：`macro`
+- 默认多 seed：`42 123 2026`
+- 输出目录：`report_key/`
+  - `report_key/seed_<seed>/task_metrics.csv`
+  - `report_key/seed_<seed>/key_task_summary.csv`
+  - `report_key/seed_aggregate.csv`（mean/std/95%CI）
+  - `report_key/decision_gate.json`（是否达标）
+- 成本门槛（中等严格）：
+  - `delta_f1_key >= 0.03`
+  - `latency_ratio <= 1.5`
+  - `retrieval_ratio <= 1.8`

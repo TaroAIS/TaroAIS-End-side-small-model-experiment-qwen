@@ -76,6 +76,7 @@ def main():
     parser.add_argument("--index_dir", default="data/index")
     parser.add_argument("--run_mode", choices=["smoke", "formal"], default="formal")
     parser.add_argument("--retrieval_scope", choices=["sample", "global"], default="sample")
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     cfg = load_yaml(args.config)
@@ -141,7 +142,7 @@ def main():
         config_paths=[args.config],
         model_info=model_info,
         hardware=detect_hardware(),
-        seed=42,
+        seed=int(args.seed),
         repo_dir=project_root(),
         run_mode=args.run_mode,
         dataset_source_meta_path=dataset_source_meta_path,

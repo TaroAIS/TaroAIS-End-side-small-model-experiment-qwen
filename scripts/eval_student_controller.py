@@ -20,6 +20,20 @@ from utils.runtime import project_root, schema_path
 from utils.schema import validate_records
 
 
+def _safe_float(v):
+    try:
+        return float(v)
+    except Exception:
+        return 0.0
+
+
+def _safe_int(v):
+    try:
+        return int(v)
+    except Exception:
+        return 0
+
+
 def _tokenize(text):
     return re.findall(r"[a-zA-Z0-9_]+|[\u4e00-\u9fff]", (text or "").lower())
 
@@ -212,6 +226,92 @@ def _end2end_eval(dataset_rows, agent_cfg, controller_fn=None):
     }
 
 
+def _task_breakdown_from_rows(model_name, rows, task_map):
+    grouped = {}
+    for r in rows:
+        sid = r.get("id", "")
+        task = task_map.get(sid, "unknown")
+        if task not in grouped:
+            grouped[task] = []
+        grouped[task].append(r)
+
+    out = []
+    for task in sorted(grouped.keys()):
+        xs = grouped[task]
+        n = float(len(xs) or 1)
+        ems = []
+        f1s = []
+        retr = []
+        lat = []
+        for r in xs:
+            em, f1 = best_over_gold(r.get("pred", ""), r.get("gold", ""))
+            ems.append(em)
+            f1s.append(f1)
+            retr.append(_safe_float(r.get("n_retrieval", 0)))
+            lat.append(_safe_float(r.get("latency_ms", {}).get("total", 0.0)))
+        out.append(
+            {
+                "model": model_name,
+                "task": task,
+                "n_samples": int(len(xs)),
+                "em": sum(ems) / n,
+                "f1": sum(f1s) / n,
+                "avg_retrieval": sum(retr) / n,
+                "avg_latency_ms": sum(lat) / n,
+            }
+        )
+    return out
+
+
+def _key_summary(task_rows, model_name, key_tasks, key_agg):
+    selected = [x for x in task_rows if x.get("model") == model_name and x.get("task") in set(key_tasks)]
+    if not selected:
+        return {
+            "model": model_name,
+            "key_tasks": "|".join(key_tasks),
+            "key_agg": key_agg,
+            "n_tasks": 0,
+            "n_samples": 0,
+            "em": 0.0,
+            "f1": 0.0,
+            "avg_retrieval": 0.0,
+            "avg_latency_ms": 0.0,
+        }
+
+    if key_agg == "micro":
+        total_n = sum([_safe_int(x.get("n_samples", 0)) for x in selected]) or 1
+        em = sum([_safe_float(x.get("em", 0.0)) * _safe_int(x.get("n_samples", 0)) for x in selected]) / float(total_n)
+        f1 = sum([_safe_float(x.get("f1", 0.0)) * _safe_int(x.get("n_samples", 0)) for x in selected]) / float(total_n)
+        avg_retrieval = sum(
+            [_safe_float(x.get("avg_retrieval", 0.0)) * _safe_int(x.get("n_samples", 0)) for x in selected]
+        ) / float(total_n)
+        avg_latency = sum(
+            [_safe_float(x.get("avg_latency_ms", 0.0)) * _safe_int(x.get("n_samples", 0)) for x in selected]
+        ) / float(total_n)
+        n_tasks = len(sorted(set([x.get("task", "") for x in selected])))
+        n_samples = total_n
+    else:
+        n = float(len(selected))
+        em = sum([_safe_float(x.get("em", 0.0)) for x in selected]) / n
+        f1 = sum([_safe_float(x.get("f1", 0.0)) for x in selected]) / n
+        avg_retrieval = sum([_safe_float(x.get("avg_retrieval", 0.0)) for x in selected]) / n
+        avg_latency = sum([_safe_float(x.get("avg_latency_ms", 0.0)) for x in selected]) / n
+        n_tasks = len(selected)
+        n_samples = sum([_safe_int(x.get("n_samples", 0)) for x in selected])
+
+    return {
+        "model": model_name,
+        "key_tasks": "|".join(key_tasks),
+        "key_agg": key_agg,
+        "n_tasks": int(n_tasks),
+        "n_samples": int(n_samples),
+        "em": em,
+        "f1": f1,
+        "avg_retrieval": avg_retrieval,
+        "avg_latency_ms": avg_latency,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description="Evaluate student controller: behavior + end-to-end")
     parser.add_argument("--agent_config", default="configs/agent.yaml")
@@ -219,6 +319,10 @@ def main():
     parser.add_argument("--checkpoint", default="checkpoints/student")
     parser.add_argument("--out_dir", default="report_student")
     parser.add_argument("--run_mode", choices=["smoke", "formal"], default="formal")
+    parser.add_argument("--task_breakdown", action="store_true", default=True)
+    parser.add_argument("--no_task_breakdown", dest="task_breakdown", action="store_false")
+    parser.add_argument("--key_tasks", nargs="+", default=["multi_doc_qa", "code_qa"])
+    parser.add_argument("--key_agg", choices=["macro", "micro"], default="macro")
     args = parser.parse_args()
 
     ensure_dir(args.out_dir)
@@ -237,6 +341,27 @@ def main():
     student_behavior = _control_eval(rows, student_controller_fn)
     teacher_e2e = _end2end_eval(rows, agent_cfg, controller_fn=None)
     student_e2e = _end2end_eval(rows, agent_cfg, controller_fn=student_controller_fn)
+
+    task_rows = []
+    key_rows = []
+    key_delta = {
+        "f1": 0.0,
+        "avg_retrieval": 0.0,
+        "avg_latency_ms": 0.0,
+    }
+    if args.task_breakdown:
+        task_map = {r.get("id", ""): r.get("task", "unknown") for r in rows}
+        task_rows.extend(_task_breakdown_from_rows("teacher_controller", teacher_e2e["rows"], task_map))
+        task_rows.extend(_task_breakdown_from_rows("student_controller", student_e2e["rows"], task_map))
+        key_rows.append(_key_summary(task_rows, "teacher_controller", args.key_tasks, args.key_agg))
+        key_rows.append(_key_summary(task_rows, "student_controller", args.key_tasks, args.key_agg))
+        teacher_key = [x for x in key_rows if x.get("model") == "teacher_controller"][0]
+        student_key = [x for x in key_rows if x.get("model") == "student_controller"][0]
+        key_delta = {
+            "f1": student_key.get("f1", 0.0) - teacher_key.get("f1", 0.0),
+            "avg_retrieval": student_key.get("avg_retrieval", 0.0) - teacher_key.get("avg_retrieval", 0.0),
+            "avg_latency_ms": student_key.get("avg_latency_ms", 0.0) - teacher_key.get("avg_latency_ms", 0.0),
+        }
 
     summary = {
         "teacher_behavior": teacher_behavior,
@@ -262,6 +387,12 @@ def main():
             "keyword_hit_rate": student_behavior["keyword_hit_rate"]
             - teacher_behavior["keyword_hit_rate"],
         },
+        "key_task_config": {
+            "enable": bool(args.task_breakdown),
+            "key_tasks": list(args.key_tasks),
+            "key_agg": args.key_agg,
+        },
+        "key_task_delta_student_minus_teacher": key_delta,
         "checkpoint_rules": rules,
     }
 
@@ -287,6 +418,12 @@ def main():
             "delta_f1_vs_teacher": 0.0,
             "delta_latency_vs_teacher": 0.0,
             "delta_retrieval_vs_teacher": 0.0,
+            "key_f1": key_rows[0]["f1"] if key_rows else 0.0,
+            "key_avg_retrieval": key_rows[0]["avg_retrieval"] if key_rows else 0.0,
+            "key_avg_latency_ms": key_rows[0]["avg_latency_ms"] if key_rows else 0.0,
+            "key_delta_f1_vs_teacher": 0.0,
+            "key_delta_latency_vs_teacher": 0.0,
+            "key_delta_retrieval_vs_teacher": 0.0,
         },
         {
             "model": "student_controller",
@@ -300,6 +437,12 @@ def main():
             "delta_f1_vs_teacher": student_e2e["f1"] - teacher_e2e["f1"],
             "delta_latency_vs_teacher": student_e2e["avg_latency_ms"] - teacher_e2e["avg_latency_ms"],
             "delta_retrieval_vs_teacher": student_e2e["avg_retrieval"] - teacher_e2e["avg_retrieval"],
+            "key_f1": key_rows[1]["f1"] if key_rows else 0.0,
+            "key_avg_retrieval": key_rows[1]["avg_retrieval"] if key_rows else 0.0,
+            "key_avg_latency_ms": key_rows[1]["avg_latency_ms"] if key_rows else 0.0,
+            "key_delta_f1_vs_teacher": key_delta["f1"],
+            "key_delta_latency_vs_teacher": key_delta["avg_latency_ms"],
+            "key_delta_retrieval_vs_teacher": key_delta["avg_retrieval"],
         },
     ]
 
@@ -315,6 +458,40 @@ def main():
             w.writeheader()
             for row in rows_out:
                 w.writerow(row)
+
+    if args.task_breakdown:
+        if pd is not None:
+            task_df = pd.DataFrame(task_rows)
+            task_df.to_csv(Path(args.out_dir) / "student_task_metrics.csv", index=False)
+            key_df = pd.DataFrame(key_rows)
+            key_df.to_csv(Path(args.out_dir) / "student_key_task_summary.csv", index=False)
+        else:
+            import csv
+
+            if task_rows:
+                with open(
+                    Path(args.out_dir) / "student_task_metrics.csv",
+                    "w",
+                    encoding="utf-8",
+                    newline="",
+                ) as f:
+                    cols = list(task_rows[0].keys())
+                    w = csv.DictWriter(f, fieldnames=cols)
+                    w.writeheader()
+                    for row in task_rows:
+                        w.writerow(row)
+            if key_rows:
+                with open(
+                    Path(args.out_dir) / "student_key_task_summary.csv",
+                    "w",
+                    encoding="utf-8",
+                    newline="",
+                ) as f:
+                    cols = list(key_rows[0].keys())
+                    w = csv.DictWriter(f, fieldnames=cols)
+                    w.writeheader()
+                    for row in key_rows:
+                        w.writerow(row)
 
     print("student eval done -> {}".format(args.out_dir))
 

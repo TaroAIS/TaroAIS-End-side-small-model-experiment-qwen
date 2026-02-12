@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 PYTHON ?= python3
 
-.PHONY: smoke preflight prepare prepare_strict index baseline agent eval distill train_student eval_student ablations all all_formal all_smoke clean
+.PHONY: smoke preflight prepare prepare_strict index baseline agent eval distill train_student eval_student ablations bench_key all all_formal all_smoke clean
 
 smoke:
 	bash scripts/cmd/smoke.sh
@@ -38,6 +38,9 @@ eval_student:
 
 ablations:
 	RUN_MODE=formal RETRIEVAL_SCOPE=sample bash scripts/run_ablations.sh data/minilongbench_test.jsonl data/index
+
+bench_key:
+	bash scripts/cmd/bench_key_tasks.sh
 
 all_smoke:
 	bash scripts/cmd/smoke.sh

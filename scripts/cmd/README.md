@@ -40,5 +40,7 @@
   - 训练 student（formal 下自动加 `--prefer_real`）。
 - `bash scripts/cmd/eval_student.sh`
   - student 控制器行为 + 端到端评测。
+- `bash scripts/cmd/bench_key_tasks.sh`
+  - 多 seed 关键任务评测（`multi_doc_qa+code_qa`）并输出 `95%CI` 与门槛判定。
 - `bash scripts/cmd/all.sh`
   - formal 全链路：`preflight -> prepare(strict) -> index -> baseline -> agent -> eval -> ablations -> distill -> train -> eval_student`。
