@@ -1,0 +1,3 @@
+method,em,f1,avg_steps,avg_retrieval,p50_latency_ms,p95_latency_ms,gpu_peak_mb,gpu_mean_mb,oom_count
+baseline_rag,,,,,,,,,
+edge_agent,,,,,,,,,

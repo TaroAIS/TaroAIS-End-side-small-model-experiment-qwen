@@ -1,0 +1,5 @@
+variant,description,em,f1,avg_retrieval,p95_latency_ms,gpu_peak_mb
+think_off,think_off,0.0,0.35582010582010576,1.0,3.2523104499999897,0.0
+iterative_off,iterative_off,0.0,0.35582010582010576,1.0,3.176960049999995,0.0
+memory_sliding,memory_sliding,0.0,0.35582010582010576,1.0,3.179839399999992,0.0
+inj_defense_off,inj_defense_off,0.0,0.35582010582010576,1.0,3.218991999999998,0.0

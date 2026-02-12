@@ -1,0 +1,5 @@
+variant,description,em,f1,avg_retrieval,p95_latency_ms,gpu_peak_mb
+think_off,thinking disabled,,,,,
+iterative_off,no iterative retrieval,,,,,
+memory_sliding,sliding window,,,,,
+inj_defense_off,no prompt injection defense,,,,,

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DatasetSample",
+  "type": "object",
+  "required": [
+    "id",
+    "task",
+    "question",
+    "documents",
+    "answer"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task": {
+      "type": "string",
+      "enum": [
+        "multi_doc_qa",
+        "single_doc_qa",
+        "code_qa"
+      ]
+    },
+    "question": {
+      "type": "string",
+      "minLength": 1
+    },
+    "documents": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "doc_id",
+          "text"
+        ],
+        "properties": {
+          "doc_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "answer": {
+      "type": "string"
+    },
+    "meta": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true
+}

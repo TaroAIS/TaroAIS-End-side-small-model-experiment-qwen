@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RunMetadata",
+  "type": "object",
+  "required": [
+    "run_id",
+    "timestamp_utc",
+    "git_commit",
+    "config_paths",
+    "model_info",
+    "hardware",
+    "seeds"
+  ],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "timestamp_utc": {
+      "type": "string",
+      "minLength": 1
+    },
+    "git_commit": {
+      "type": "string"
+    },
+    "config_paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "model_info": {
+      "type": "object",
+      "required": [
+        "backend",
+        "name_or_path",
+        "quantization",
+        "n_ctx",
+        "n_gpu_layers"
+      ],
+      "properties": {
+        "backend": {
+          "type": "string"
+        },
+        "name_or_path": {
+          "type": "string"
+        },
+        "quantization": {
+          "type": "string"
+        },
+        "n_ctx": {
+          "type": "integer"
+        },
+        "n_gpu_layers": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": true
+    },
+    "hardware": {
+      "type": "object",
+      "properties": {
+        "gpu_name": {
+          "type": "string"
+        },
+        "gpu_mem_mb": {
+          "type": "number"
+        },
+        "cpu": {
+          "type": "string"
+        },
+        "ram_gb": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": true
+    },
+    "seeds": {
+      "type": "object",
+      "required": [
+        "python",
+        "numpy",
+        "torch"
+      ],
+      "properties": {
+        "python": {
+          "type": "integer"
+        },
+        "numpy": {
+          "type": "integer"
+        },
+        "torch": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": true
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

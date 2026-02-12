@@ -1,0 +1,20 @@
+# Evaluation config (v4)
+metrics:
+  qa:
+    enabled: true
+    normalize: true
+    chinese:
+      mode: "char"       # char|jieba(optional)
+  cost:
+    enabled: true
+    tokens:
+      enabled: true
+  gpu_mem:
+    enabled: true
+
+report:
+  out_dir: "report"
+  save_csv: true
+  save_png: true
+  figures:
+    dpi: 150

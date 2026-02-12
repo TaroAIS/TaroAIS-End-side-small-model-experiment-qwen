@@ -1,0 +1,3 @@
+{"id":"tiny_0001","task":"single_doc_qa","question":"文档里提到的核心模型是什么？","documents":[{"doc_id":"d1","text":"本方案使用 Qwen3-8B-Thinking 作为端侧推理模型，结合动态检索与显存管理处理长文档。"}],"answer":"Qwen3-8B-Thinking"}
+{"id":"tiny_0002","task":"multi_doc_qa","question":"为什么需要 4-bit 量化？","documents":[{"doc_id":"d1","text":"8B FP16 约 16GB 显存，4060 8GB 无法加载。"},{"doc_id":"d2","text":"GGUF Q4_K_M 量化后权重约 5.5GB，可留下显存给 KV cache。"}],"answer":"因为 8B 的 FP16 显存需求超过 8GB，4-bit 量化能把权重压到约 5.5GB 以适配 4060 并留出 KV cache 空间"}
+{"id":"tiny_0003","task":"code_qa","question":"这个函数的作用是什么？","documents":[{"doc_id":"d1","text":"def prune_history(prompt):\n    # 如果上下文超过预算，丢弃最早片段\n    return prompt[-8000:]\n"}],"answer":"在上下文超过预算时裁剪历史内容，保留最新部分以防 OOM"}

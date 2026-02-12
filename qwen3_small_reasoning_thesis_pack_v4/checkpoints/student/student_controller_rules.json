@@ -1,0 +1,7 @@
+{
+  "policy": "heuristic",
+  "rules": [
+    "if task is multi_doc_qa then prefer <search>",
+    "if evidence overlap with question is high then <final>"
+  ]
+}

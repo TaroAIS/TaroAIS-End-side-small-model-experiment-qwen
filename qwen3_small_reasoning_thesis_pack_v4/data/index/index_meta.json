@@ -1,0 +1,7 @@
+{
+  "mode": "lexical",
+  "embedding_model": "sentence-transformers",
+  "index_type": "faiss",
+  "n_chunks": 40,
+  "chunk_path": "data/corpus_chunks.jsonl"
+}

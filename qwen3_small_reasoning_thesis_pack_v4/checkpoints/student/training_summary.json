@@ -1,0 +1,31 @@
+{
+  "mode": "placeholder",
+  "reason": "real qlora training dependencies unavailable or disabled",
+  "n_train": 30,
+  "student_model": "Qwen/Qwen3-0.6B",
+  "lora": {
+    "r": 16,
+    "alpha": 32,
+    "dropout": 0.05,
+    "target_modules": [
+      "q_proj",
+      "k_proj",
+      "v_proj",
+      "o_proj",
+      "gate_proj",
+      "up_proj",
+      "down_proj"
+    ]
+  },
+  "sft": {
+    "max_seq_length": 2048,
+    "per_device_train_batch_size": 1,
+    "gradient_accumulation_steps": 16,
+    "num_train_epochs": 1,
+    "learning_rate": "2e-4",
+    "warmup_ratio": 0.03,
+    "logging_steps": 10,
+    "save_steps": 200,
+    "eval_steps": 200
+  }
+}

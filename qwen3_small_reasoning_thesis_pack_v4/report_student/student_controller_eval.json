@@ -1,0 +1,26 @@
+{
+  "behavior": {
+    "trigger_acc": 0.6666666666666666,
+    "macro_f1": 0.6666666666666666,
+    "keyword_hit_rate": 0.0
+  },
+  "teacher_e2e": {
+    "f1": 0.35582010582010576,
+    "em": 0.0,
+    "avg_retrieval": 1.0,
+    "avg_latency_ms": 1.3736075833333352
+  },
+  "student_e2e": {
+    "f1": 0.13835646618197842,
+    "em": 0.0,
+    "avg_retrieval": 1.3333333333333333,
+    "avg_latency_ms": 0.1871249166666642
+  },
+  "checkpoint_rules": {
+    "policy": "heuristic",
+    "rules": [
+      "if task is multi_doc_qa then prefer <search>",
+      "if evidence overlap with question is high then <final>"
+    ]
+  }
+}

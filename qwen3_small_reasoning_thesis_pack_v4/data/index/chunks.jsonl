@@ -1,0 +1,4 @@
+{"sample_id": "tiny_0001", "doc_id": "d1", "chunk_id": "tiny_0001_d1_0", "offset_start": 0, "offset_end": 50, "text": "本方案使用 Qwen3-8B-Thinking 作为端侧推理模型，结合动态检索与显存管理处理长文档。"}
+{"sample_id": "tiny_0002", "doc_id": "d1", "chunk_id": "tiny_0002_d1_0", "offset_start": 0, "offset_end": 32, "text": "8B FP16 约 16GB 显存，4060 8GB 无法加载。"}
+{"sample_id": "tiny_0002", "doc_id": "d2", "chunk_id": "tiny_0002_d2_0", "offset_start": 0, "offset_end": 41, "text": "GGUF Q4_K_M 量化后权重约 5.5GB，可留下显存给 KV cache。"}
+{"sample_id": "tiny_0003", "doc_id": "d1", "chunk_id": "tiny_0003_d1_0", "offset_start": 0, "offset_end": 76, "text": "def prune_history(prompt):\n    # 如果上下文超过预算，丢弃最早片段\n    return prompt[-8000:]\n"}

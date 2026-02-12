@@ -1,0 +1,4 @@
+accuracy_bar.png
+cost_effect_curve.png
+retrieval_effect_curve.png
+gpu_mem_curve.png

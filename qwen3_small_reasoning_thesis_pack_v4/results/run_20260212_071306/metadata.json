@@ -1,0 +1,27 @@
+{
+  "run_id": "run_20260212_071306",
+  "timestamp_utc": "2026-02-12T07:13:06Z",
+  "git_commit": "280fae796a9bbbe0d983ff8322b3a906e9d92db5",
+  "config_paths": [
+    "configs/agent_inj_defense_off.yaml"
+  ],
+  "model_info": {
+    "backend": "local",
+    "name_or_path": "qwen3:8b",
+    "quantization": "unknown",
+    "n_ctx": 8000,
+    "n_gpu_layers": 0
+  },
+  "hardware": {
+    "gpu_name": "none",
+    "gpu_mem_mb": 0.0,
+    "cpu": "arm",
+    "ram_gb": 18.0
+  },
+  "seeds": {
+    "python": 42,
+    "numpy": 42,
+    "torch": 42
+  },
+  "notes": ""
+}

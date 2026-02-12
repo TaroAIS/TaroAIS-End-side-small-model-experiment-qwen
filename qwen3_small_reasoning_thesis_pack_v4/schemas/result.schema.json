@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PredictionResult",
+  "type": "object",
+  "required": [
+    "id",
+    "pred",
+    "gold",
+    "n_steps",
+    "n_retrieval",
+    "latency_ms",
+    "gpu_mem_mb"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "pred": {
+      "type": "string"
+    },
+    "gold": {
+      "type": "string"
+    },
+    "n_steps": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "n_retrieval": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "latency_ms": {
+      "type": "object",
+      "required": [
+        "total",
+        "llm",
+        "retrieval"
+      ],
+      "properties": {
+        "total": {
+          "type": "number",
+          "minimum": 0
+        },
+        "llm": {
+          "type": "number",
+          "minimum": 0
+        },
+        "retrieval": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "gpu_mem_mb": {
+      "type": "object",
+      "required": [
+        "peak",
+        "mean"
+      ],
+      "properties": {
+        "peak": {
+          "type": "number",
+          "minimum": 0
+        },
+        "mean": {
+          "type": "number",
+          "minimum": 0
+        },
+        "series": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "pruning_log": {
+      "type": "object"
+    },
+    "error_count": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": true
+}

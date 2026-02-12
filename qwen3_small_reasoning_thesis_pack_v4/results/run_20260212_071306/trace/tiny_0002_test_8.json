@@ -1,0 +1,14 @@
+{
+  "id": "tiny_0002_test_8",
+  "question": "为什么需要 4-bit 量化？",
+  "steps": [
+    {
+      "step": 1,
+      "raw_output": "<final>GGUF Q4_K_M 量化后权重约 5.5GB，可留下显存给 KV cache</final>",
+      "parsed_tag": "final",
+      "parsed_content": "GGUF Q4_K_M 量化后权重约 5.5GB，可留下显存给 KV cache",
+      "repaired": false,
+      "dropped": []
+    }
+  ]
+}

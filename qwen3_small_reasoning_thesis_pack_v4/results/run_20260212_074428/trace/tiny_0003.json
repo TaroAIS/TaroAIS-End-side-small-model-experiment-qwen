@@ -1,0 +1,14 @@
+{
+  "id": "tiny_0003",
+  "question": "这个函数的作用是什么？",
+  "steps": [
+    {
+      "step": 1,
+      "raw_output": "<final>本方案使用 Qwen3-8B-Thinking 作为端侧推理模型，结合动态检索与显存管理处理长文档</final>",
+      "parsed_tag": "final",
+      "parsed_content": "本方案使用 Qwen3-8B-Thinking 作为端侧推理模型，结合动态检索与显存管理处理长文档",
+      "repaired": false,
+      "dropped": []
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "run_id": "run_20260212_001",
+  "timestamp_utc": "2026-02-12T00:00:00Z",
+  "git_commit": "(filled_by_script)",
+  "config_paths": [
+    "configs/agent.yaml",
+    "configs/eval.yaml"
+  ],
+  "model_info": {
+    "backend": "local",
+    "name_or_path": "qwen3:8b",
+    "quantization": "gguf-q4_k_m",
+    "n_ctx": 8192,
+    "n_gpu_layers": 32
+  },
+  "hardware": {
+    "gpu_name": "RTX 4060",
+    "gpu_mem_mb": 8192,
+    "cpu": "",
+    "ram_gb": 16
+  },
+  "seeds": {
+    "python": 42,
+    "numpy": 42,
+    "torch": 42
+  },
+  "notes": ""
+}

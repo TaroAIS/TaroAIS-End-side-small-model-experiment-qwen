@@ -1,0 +1,7 @@
+{
+  "mode": "lexical",
+  "embedding_model": "sentence-transformers",
+  "index_type": "faiss",
+  "n_chunks": 16,
+  "chunk_path": "/Users/sullyoone/IdeaProjects/End-side-small-model-experiment-qwen/TaroAIS-End-side-small-model-experiment-qwen/qwen3_small_reasoning_thesis_pack_v4/data/student_eval_index/chunks.jsonl"
+}
