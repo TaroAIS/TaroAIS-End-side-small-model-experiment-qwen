@@ -11,7 +11,7 @@ model:
     temperature: 0.35
     top_p: 0.90
     top_k: 20
-    max_new_tokens: 320
+    max_new_tokens: 288
 
 local_backend:
   provider: "ollama"               # ollama|llama_cpp_server
@@ -36,7 +36,7 @@ retrieval:
     retrieval_cache: false
 
 agent:
-  max_steps: 4
+  max_steps: 3
   max_prompt_tokens: 8000
   memory_strategy: "fact_memory"   # sliding_window|fact_memory
   facts_per_step: 6
@@ -44,15 +44,23 @@ agent:
   # Early-stop controls for balancing quality and latency.
   early_stop:
     enable: true
-    max_same_keyword_hits: 2
+    max_same_keyword_hits: 3
     max_no_new_chunk_steps: 2
     enable_single_doc_shortcut: true
-    single_doc_max_steps: 2
+    single_doc_max_steps: 3
+    enable_query_rewrite_retry: false
 
   # Output protocol enforcement
   format_repair:
     enable: true
-    max_retries: 1
+    max_retries: 2
+
+  task_overrides:
+    single_doc_qa:
+      top_k_init: 3
+      enable_final_refine: true
+      final_refine_max_new_tokens: 192
+      final_refine_temperature: 0.2
 
   # Meta-cognitive retrieval trigger (optional)
   uncertainty_trigger:
