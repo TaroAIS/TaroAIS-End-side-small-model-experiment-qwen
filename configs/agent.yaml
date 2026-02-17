@@ -11,7 +11,7 @@ model:
     temperature: 0.35
     top_p: 0.90
     top_k: 20
-    max_new_tokens: 288
+    max_new_tokens: 272
 
 local_backend:
   provider: "ollama"               # ollama|llama_cpp_server
@@ -61,6 +61,34 @@ agent:
       enable_final_refine: true
       final_refine_max_new_tokens: 192
       final_refine_temperature: 0.2
+      low_confidence:
+        enable: true
+        min_answer_chars: 24
+        uncertainty_markers:
+          - "wait"
+          - "maybe"
+          - "however"
+          - "not sure"
+          - "我不确定"
+          - "可能"
+        truncated_tail_markers:
+          - "which"
+          - "that"
+          - "and"
+          - "or"
+          - ","
+          - ":"
+          - ";"
+      forced_retrieve:
+        enable: true
+        max_extra_searches: 1
+        top_k_extra: 1
+      long_context:
+        enable: true
+        threshold_chars: 80000
+        top_k_init: 4
+        max_steps: 4
+        enable_single_doc_shortcut: false
 
   # Meta-cognitive retrieval trigger (optional)
   uncertainty_trigger:
