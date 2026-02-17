@@ -53,6 +53,7 @@ class LocalLLMDriver(object):
             system_prompt=system_prompt,
             temperature=temperature,
             max_new_tokens=max_new_tokens,
+            expect_protocol=expect_protocol,
         )
         if content is not None:
             self._last_backend_mode = "real"
@@ -70,8 +71,93 @@ class LocalLLMDriver(object):
         self._last_backend_mode = "mock"
         return self._mock_generate(prompt, expect_protocol=expect_protocol)
 
-    def _generate_remote(self, prompt, system_prompt, temperature, max_new_tokens):
+    @staticmethod
+    def _as_text(value):
+        if isinstance(value, list):
+            out = []
+            for item in value:
+                if isinstance(item, dict):
+                    txt = item.get("text", "")
+                    if txt:
+                        out.append(str(txt))
+                elif isinstance(item, str):
+                    out.append(item)
+            return "\n".join(out).strip()
+        if value is None:
+            return ""
+        return str(value).strip()
+
+    def _apply_soft_switch(self, prompt, expect_protocol=False):
+        model_cfg = self.cfg.get("model", {})
+        thinking_cfg = model_cfg.get("thinking", {}) or {}
+        soft_cfg = thinking_cfg.get("soft_switch", {}) or {}
+        enable_think = bool(thinking_cfg.get("enable", False))
+        think_tag = str(soft_cfg.get("think", "") or "").strip()
+        no_think_tag = str(soft_cfg.get("no_think", "") or "").strip()
+        if expect_protocol and no_think_tag:
+            selected_tag = no_think_tag
+        else:
+            selected_tag = think_tag if enable_think else no_think_tag
+        if not selected_tag:
+            return prompt
+        prompt = prompt or ""
+        stripped = prompt.lstrip()
+        if think_tag and stripped.startswith(think_tag):
+            return prompt
+        if no_think_tag and stripped.startswith(no_think_tag):
+            return prompt
+        return "{}\n{}".format(selected_tag, prompt)
+
+    def _extract_primary_text(self, message):
+        if not isinstance(message, dict):
+            return ""
+        return self._as_text(message.get("content", ""))
+
+    def _extract_reasoning_text(self, message):
+        if not isinstance(message, dict):
+            return ""
+        for key in ["reasoning", "reasoning_content", "thinking", "thought"]:
+            value = self._as_text(message.get(key, ""))
+            if value:
+                return value
+        return ""
+
+    def _extract_from_choice(self, choice):
+        if not isinstance(choice, dict):
+            return "", "", ""
+        message = choice.get("message", {})
+        content = self._extract_primary_text(message)
+        reasoning = self._extract_reasoning_text(message)
+        finish_reason = str(choice.get("finish_reason", "") or "")
+        return content, reasoning, finish_reason
+
+    def _request_chat_once(self, endpoint, payload):
+        resp = requests.post(endpoint, json=payload, timeout=self.timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        choices = data.get("choices", [])
+        if not choices:
+            return "", "", ""
+        return self._extract_from_choice(choices[0])
+
+    @staticmethod
+    def _reasoning_fallback(reasoning_text, expect_protocol):
+        text = (reasoning_text or "").strip()
+        if not text:
+            return None
+        if expect_protocol:
+            m = re.search(r"<\s*(search|final)\s*>.*?<\s*/\s*\1\s*>", text, flags=re.I | re.S)
+            if m:
+                return m.group(0).strip()
+            lines = [x.strip() for x in text.splitlines() if x.strip()]
+            tail = lines[-1] if lines else text
+            return "<final>{}</final>".format(tail)
+        lines = [x.strip() for x in text.splitlines() if x.strip()]
+        return (lines[-1] if lines else text).strip() or None
+
+    def _generate_remote(self, prompt, system_prompt, temperature, max_new_tokens, expect_protocol=False):
         endpoint = self.base_url.rstrip("/") + "/chat/completions"
+        user_prompt = self._apply_soft_switch(prompt, expect_protocol=expect_protocol)
         payload = {
             "model": self.model,
             "messages": [],
@@ -80,21 +166,30 @@ class LocalLLMDriver(object):
         }
         if system_prompt:
             payload["messages"].append({"role": "system", "content": system_prompt})
-        payload["messages"].append({"role": "user", "content": prompt})
+        payload["messages"].append({"role": "user", "content": user_prompt})
 
         try:
-            resp = requests.post(endpoint, json=payload, timeout=self.timeout)
-            resp.raise_for_status()
-            data = resp.json()
-            choices = data.get("choices", [])
-            if not choices:
-                return None
-            msg = choices[0].get("message", {})
-            text = msg.get("content", "")
-            if isinstance(text, list):
-                text = "\n".join([x.get("text", "") for x in text if isinstance(x, dict)])
-            text = (text or "").strip()
-            return text or None
+            content, reasoning, finish_reason = self._request_chat_once(endpoint, payload)
+            if content:
+                return content
+
+            retry_max_tokens = min(max(512, int(max_new_tokens) * 2), 2048)
+            if finish_reason == "length" and retry_max_tokens > int(max_new_tokens):
+                retry_payload = dict(payload)
+                retry_payload["max_tokens"] = int(retry_max_tokens)
+                content2, reasoning2, finish_reason2 = self._request_chat_once(endpoint, retry_payload)
+                if content2:
+                    return content2
+                if reasoning2:
+                    reasoning = reasoning2
+                finish_reason = finish_reason2 or finish_reason
+
+            fallback = self._reasoning_fallback(reasoning, expect_protocol=expect_protocol)
+            if fallback:
+                return fallback
+
+            self._last_error = "empty content from local backend (finish_reason={})".format(finish_reason or "unknown")
+            return None
         except Exception as exc:
             self._last_error = str(exc)
             return None

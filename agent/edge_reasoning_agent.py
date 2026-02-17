@@ -28,10 +28,15 @@ class EdgeReasoningAgent(object):
         self.index = retrieval_index
         self.controller_fn = controller_fn
 
+    @staticmethod
+    def _normalize_keyword(text):
+        return " ".join(str(text or "").strip().lower().split())
+
     def run_sample(self, sample, trace_path=None):
         question = sample.get("question", "")
         gold = sample.get("answer", "")
         sid = sample.get("id", "")
+        task = str(sample.get("task", "unknown")).strip().lower()
 
         agent_cfg = self.cfg.get("agent", {})
         retrieval_cfg = self.cfg.get("retrieval", {})
@@ -44,6 +49,12 @@ class EdgeReasoningAgent(object):
         max_prompt_tokens = int(agent_cfg.get("max_prompt_tokens", 8000))
         facts_per_step = int(agent_cfg.get("facts_per_step", 6))
         inject_cfg = agent_cfg.get("injection_defense", {})
+        early_stop_cfg = agent_cfg.get("early_stop", {})
+        early_stop_enable = bool(early_stop_cfg.get("enable", False))
+        max_same_keyword_hits = max(1, int(early_stop_cfg.get("max_same_keyword_hits", 2)))
+        max_no_new_chunk_steps = max(1, int(early_stop_cfg.get("max_no_new_chunk_steps", 2)))
+        enable_single_doc_shortcut = bool(early_stop_cfg.get("enable_single_doc_shortcut", False))
+        single_doc_max_steps = max(1, int(early_stop_cfg.get("single_doc_max_steps", 2)))
 
         timer = PhaseTimer()
         monitor = NvmlMonitor(sample_ms=logging_cfg.get("nvml_sample_ms", 200))
@@ -66,6 +77,9 @@ class EdgeReasoningAgent(object):
         completion_tokens_total = 0
         error_count = 0
         pred = ""
+        last_search_keyword = ""
+        same_keyword_hits = 0
+        no_new_chunk_steps = 0
 
         for step in range(1, max_steps + 1):
             monitor.sample()
@@ -125,23 +139,72 @@ class EdgeReasoningAgent(object):
                 "parsed_content": content,
                 "repaired": repaired,
                 "dropped": dropped,
+                "forced_final": False,
+                "early_stop_reason": "",
             }
 
             if tag == "search":
                 keyword = content.strip() or question
+                normalized_keyword = self._normalize_keyword(keyword)
+                if normalized_keyword and normalized_keyword == last_search_keyword:
+                    same_keyword_hits += 1
+                else:
+                    same_keyword_hits = 1
+                last_search_keyword = normalized_keyword
+
+                before_chunk_ids = set([c.get("chunk_id", "") for c in memory.chunks])
                 with timer.phase("retrieval"):
                     hits = self.index.search(keyword, top_k=top_k_iter)
                 n_retrieval += 1
                 retrieved_chunks_total += len(hits)
                 memory.add_chunks(hits)
+                new_chunk_ids = []
+                for h in hits:
+                    cid = h.get("chunk_id", "")
+                    if cid and cid not in before_chunk_ids:
+                        new_chunk_ids.append(cid)
+                if new_chunk_ids:
+                    no_new_chunk_steps = 0
+                else:
+                    no_new_chunk_steps += 1
 
                 facts = extract_facts_from_chunks(hits, limit=facts_per_step)
                 memory.add_facts(facts)
                 dropped_after = memory.prune_to_budget()
                 step_info["search_keyword"] = keyword
                 step_info["retrieval_hits"] = [h.get("chunk_id", "") for h in hits]
+                step_info["new_chunk_ids"] = new_chunk_ids
+                step_info["same_keyword_hits"] = int(same_keyword_hits)
+                step_info["no_new_chunk_steps"] = int(no_new_chunk_steps)
                 step_info["facts"] = facts
                 step_info["dropped_after"] = dropped_after
+
+                early_stop_reasons = []
+                if early_stop_enable:
+                    if same_keyword_hits >= max_same_keyword_hits:
+                        early_stop_reasons.append(
+                            "same_keyword_hits>={}".format(max_same_keyword_hits)
+                        )
+                    if no_new_chunk_steps >= max_no_new_chunk_steps:
+                        early_stop_reasons.append(
+                            "no_new_chunk_steps>={}".format(max_no_new_chunk_steps)
+                        )
+                    if (
+                        enable_single_doc_shortcut
+                        and task == "single_doc_qa"
+                        and step >= single_doc_max_steps
+                    ):
+                        early_stop_reasons.append(
+                            "single_doc_shortcut_step>={}".format(single_doc_max_steps)
+                        )
+
+                if early_stop_reasons:
+                    pred = memory.best_answer_from_chunks(question)
+                    step_info["forced_final"] = True
+                    step_info["early_stop_reason"] = ";".join(early_stop_reasons)
+                    trace["steps"].append(step_info)
+                    break
+
                 trace["steps"].append(step_info)
                 continue
 

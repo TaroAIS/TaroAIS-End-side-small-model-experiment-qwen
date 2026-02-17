@@ -8,10 +8,10 @@ model:
       think: "/think"
       no_think: "/no_think"
   decoding:
-    temperature: 0.6
-    top_p: 0.95
+    temperature: 0.35
+    top_p: 0.90
     top_k: 20
-    max_new_tokens: 512
+    max_new_tokens: 320
 
 local_backend:
   provider: "ollama"               # ollama|llama_cpp_server
@@ -29,17 +29,25 @@ retrieval:
   sample_index: "lexical"
   chunk_size: 512
   chunk_overlap: 128
-  top_k_init: 3
+  top_k_init: 2
   top_k_iter: 1
   cache:
     embedding_cache: true
     retrieval_cache: false
 
 agent:
-  max_steps: 6
+  max_steps: 4
   max_prompt_tokens: 8000
   memory_strategy: "fact_memory"   # sliding_window|fact_memory
   facts_per_step: 6
+
+  # Early-stop controls for balancing quality and latency.
+  early_stop:
+    enable: true
+    max_same_keyword_hits: 2
+    max_no_new_chunk_steps: 2
+    enable_single_doc_shortcut: true
+    single_doc_max_steps: 2
 
   # Output protocol enforcement
   format_repair:
