@@ -217,8 +217,14 @@ class EdgeReasoningAgent(object):
         format_repair_max_retries = max(0, int(format_repair_cfg.get("max_retries", 1)))
         task_overrides = agent_cfg.get("task_overrides", {})
         single_doc_override = {}
+        code_override = {}
+        multi_doc_override = {}
+        task_override = {}
         if isinstance(task_overrides, dict):
             single_doc_override = task_overrides.get("single_doc_qa", {}) or {}
+            code_override = task_overrides.get("code_qa", {}) or {}
+            multi_doc_override = task_overrides.get("multi_doc_qa", {}) or {}
+            task_override = task_overrides.get(task, {}) or {}
         single_doc_top_k_init = int(single_doc_override.get("top_k_init", 3))
         enable_single_doc_final_refine = bool(single_doc_override.get("enable_final_refine", False))
         single_doc_refine_max_new_tokens = int(
@@ -227,27 +233,79 @@ class EdgeReasoningAgent(object):
         single_doc_refine_temperature = float(
             single_doc_override.get("final_refine_temperature", 0.2)
         )
+        decoding_budget_cfg = agent_cfg.get("decoding_budget", {}) or {}
+        decoding_budget_enable = bool(decoding_budget_cfg.get("enable", False))
+        short_question_token_threshold = int(
+            decoding_budget_cfg.get("short_question_token_threshold", 12)
+        )
+        short_question_max_new_tokens = int(
+            decoding_budget_cfg.get("short_question_max_new_tokens", 192)
+        )
+        budget_default_max_new_tokens = decoding_budget_cfg.get("default_max_new_tokens")
+        budget_task_caps = decoding_budget_cfg.get("task_caps", {}) or {}
         default_temperature = float(model_decoding_cfg.get("temperature", 0.2))
         single_doc_temperature = single_doc_override.get("temperature")
         effective_temperature = default_temperature
         if task == "single_doc_qa" and single_doc_temperature is not None:
             effective_temperature = float(single_doc_temperature)
+        if isinstance(task_override, dict) and task_override.get("temperature") is not None:
+            effective_temperature = float(task_override.get("temperature"))
         default_max_new_tokens = int(model_decoding_cfg.get("max_new_tokens", 256))
         single_doc_max_new_tokens = single_doc_override.get("max_new_tokens")
         effective_max_new_tokens = default_max_new_tokens
         if task == "single_doc_qa" and single_doc_max_new_tokens is not None:
             effective_max_new_tokens = int(single_doc_max_new_tokens)
+        if isinstance(task_override, dict) and task_override.get("max_new_tokens") is not None:
+            effective_max_new_tokens = int(task_override.get("max_new_tokens"))
+        effective_max_new_tokens_pre_budget = int(effective_max_new_tokens)
+        if decoding_budget_enable:
+            if budget_default_max_new_tokens is not None:
+                effective_max_new_tokens = min(
+                    effective_max_new_tokens, int(budget_default_max_new_tokens)
+                )
+            if isinstance(budget_task_caps, dict) and budget_task_caps.get(task) is not None:
+                effective_max_new_tokens = min(
+                    effective_max_new_tokens, int(budget_task_caps.get(task))
+                )
+            if len(self._query_tokens(question)) <= max(1, short_question_token_threshold):
+                effective_max_new_tokens = min(
+                    effective_max_new_tokens, max(32, short_question_max_new_tokens)
+                )
         effective_top_k_init = top_k_init
+        effective_top_k_iter = top_k_iter
         effective_max_steps = base_max_steps
         effective_enable_single_doc_shortcut = enable_single_doc_shortcut
+        if isinstance(task_override, dict):
+            if task_override.get("top_k_init") is not None:
+                effective_top_k_init = max(effective_top_k_init, int(task_override.get("top_k_init")))
+            if task_override.get("top_k_iter") is not None:
+                effective_top_k_iter = max(1, int(task_override.get("top_k_iter")))
+            if task_override.get("max_steps") is not None:
+                effective_max_steps = max(effective_max_steps, int(task_override.get("max_steps")))
 
-        low_conf_cfg = single_doc_override.get("low_confidence", {}) or {}
-        low_conf_enable = bool(low_conf_cfg.get("enable", False))
+        task_low_conf_cfg = {}
+        task_low_conf_enable = False
+        if isinstance(task_override, dict):
+            task_low_conf_cfg = task_override.get("low_confidence", {}) or {}
+            task_low_conf_enable = bool(task_low_conf_cfg.get("enable", False))
 
-        forced_retrieve_cfg = single_doc_override.get("forced_retrieve", {}) or {}
-        forced_retrieve_enable = bool(forced_retrieve_cfg.get("enable", False))
-        forced_retrieve_max_extra = max(0, int(forced_retrieve_cfg.get("max_extra_searches", 1)))
-        forced_retrieve_top_k_extra = max(1, int(forced_retrieve_cfg.get("top_k_extra", 1)))
+        task_forced_retrieve_cfg = {}
+        task_forced_retrieve_enable = False
+        task_forced_retrieve_max_extra = 0
+        task_forced_retrieve_top_k_extra = 1
+        task_force_on_first_final = False
+        if isinstance(task_override, dict):
+            task_forced_retrieve_cfg = task_override.get("forced_retrieve", {}) or {}
+            task_forced_retrieve_enable = bool(task_forced_retrieve_cfg.get("enable", False))
+            task_forced_retrieve_max_extra = max(
+                0, int(task_forced_retrieve_cfg.get("max_extra_searches", 1))
+            )
+            task_forced_retrieve_top_k_extra = max(
+                1, int(task_forced_retrieve_cfg.get("top_k_extra", 1))
+            )
+            task_force_on_first_final = bool(
+                task_forced_retrieve_cfg.get("force_on_first_final", False)
+            )
 
         long_context_cfg = single_doc_override.get("long_context", {}) or {}
         long_context_enable = bool(long_context_cfg.get("enable", False))
@@ -257,6 +315,12 @@ class EdgeReasoningAgent(object):
         long_context_shortcut = bool(
             long_context_cfg.get("enable_single_doc_shortcut", False)
         )
+        task_enable_query_rewrite_retry = bool(enable_query_rewrite_retry)
+        if task == "multi_doc_qa" and isinstance(multi_doc_override, dict):
+            if multi_doc_override.get("enable_query_rewrite_retry") is not None:
+                task_enable_query_rewrite_retry = bool(
+                    multi_doc_override.get("enable_query_rewrite_retry")
+                )
 
         context_chars = int(
             sum([len((d or {}).get("text", "")) for d in sample.get("documents", [])])
@@ -280,9 +344,12 @@ class EdgeReasoningAgent(object):
             "question": question,
             "steps": [],
             "effective_top_k_init": int(effective_top_k_init),
+            "effective_top_k_iter": int(effective_top_k_iter),
             "effective_max_steps": int(effective_max_steps),
             "effective_temperature": float(effective_temperature),
             "effective_max_new_tokens": int(effective_max_new_tokens),
+            "effective_max_new_tokens_pre_budget": int(effective_max_new_tokens_pre_budget),
+            "decoding_budget_enabled": bool(decoding_budget_enable),
             "context_chars": int(context_chars),
             "long_context_applied": bool(long_context_applied),
         }
@@ -415,7 +482,7 @@ class EdgeReasoningAgent(object):
 
                 before_chunk_ids = set([c.get("chunk_id", "") for c in memory.chunks])
                 with timer.phase("retrieval"):
-                    hits = self.index.search(keyword, top_k=top_k_iter)
+                    hits = self.index.search(keyword, top_k=effective_top_k_iter)
                 n_retrieval += 1
                 retrieved_chunks_total += len(hits)
                 memory.add_chunks(hits)
@@ -466,7 +533,7 @@ class EdgeReasoningAgent(object):
                     )
                     if (
                         early_stop_enable
-                        and enable_query_rewrite_retry
+                        and task_enable_query_rewrite_retry
                         and rewrite_triggered
                         and (not rewrite_used)
                     ):
@@ -478,7 +545,9 @@ class EdgeReasoningAgent(object):
                             step_info["rewrite_keyword"] = rewrite_keyword
                             before_rewrite_chunk_ids = set([c.get("chunk_id", "") for c in memory.chunks])
                             with timer.phase("retrieval"):
-                                rewrite_hits = self.index.search(rewrite_keyword, top_k=top_k_iter)
+                                rewrite_hits = self.index.search(
+                                    rewrite_keyword, top_k=effective_top_k_iter
+                                )
                             n_retrieval += 1
                             retrieved_chunks_total += len(rewrite_hits)
                             memory.add_chunks(rewrite_hits)
@@ -537,28 +606,30 @@ class EdgeReasoningAgent(object):
             pred_candidate = content.strip() or memory.best_answer_from_chunks(question)
             low_confidence_detected = False
             low_confidence_reason = ""
-            if task == "single_doc_qa" and low_conf_enable:
+            if task_low_conf_enable:
                 low_confidence_detected, low_confidence_reason = self._is_low_confidence_final(
                     pred_candidate,
                     question,
-                    low_conf_cfg,
+                    task_low_conf_cfg,
                 )
             step_info["low_confidence_detected"] = bool(low_confidence_detected)
             step_info["low_confidence_reason"] = low_confidence_reason
 
+            force_retrieve_hit = bool(low_confidence_detected or task_force_on_first_final)
             if (
-                task == "single_doc_qa"
-                and tag == "final"
+                tag == "final"
                 and step == 1
-                and forced_retrieve_enable
-                and low_confidence_detected
-                and forced_search_count < forced_retrieve_max_extra
+                and task_forced_retrieve_enable
+                and force_retrieve_hit
+                and forced_search_count < task_forced_retrieve_max_extra
             ):
                 forced_search_count += 1
                 forced_keyword = self._build_forced_search_keyword(question, fallback=pred_candidate)
                 before_chunk_ids = set([c.get("chunk_id", "") for c in memory.chunks])
                 with timer.phase("retrieval"):
-                    forced_hits = self.index.search(forced_keyword, top_k=forced_retrieve_top_k_extra)
+                    forced_hits = self.index.search(
+                        forced_keyword, top_k=task_forced_retrieve_top_k_extra
+                    )
                 n_retrieval += 1
                 retrieved_chunks_total += len(forced_hits)
                 memory.add_chunks(forced_hits)

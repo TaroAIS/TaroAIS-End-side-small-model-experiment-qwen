@@ -30,13 +30,24 @@ def _build_driver(cfg):
 
 
 def _load_or_build_index(cfg, dataset_rows, index_dir):
+    retrieval_cfg = cfg.get("retrieval", {})
+    runtime_mode = str(cfg.get("runtime", {}).get("run_mode", "formal")).lower()
+    require_dense_in_formal = bool(retrieval_cfg.get("require_dense_in_formal", False))
+    hybrid_cfg = retrieval_cfg.get("hybrid", {})
+
     if index_dir and (Path(index_dir) / "index_meta.json").exists():
         try:
-            return RetrievalIndex.load(index_dir)
+            idx = RetrievalIndex.load(index_dir)
+            if require_dense_in_formal and runtime_mode == "formal" and idx.mode == "lexical":
+                raise RuntimeError(
+                    "Formal mode requires dense retrieval, but loaded index is lexical: {}".format(
+                        index_dir
+                    )
+                )
+            return idx
         except Exception:
             pass
 
-    retrieval_cfg = cfg.get("retrieval", {})
     chunk_size = int(retrieval_cfg.get("chunk_size", 512))
     chunk_overlap = int(retrieval_cfg.get("chunk_overlap", 128))
     emb_model = retrieval_cfg.get("embedding_model", "sentence-transformers")
@@ -56,15 +67,20 @@ def _load_or_build_index(cfg, dataset_rows, index_dir):
         chunk_overlap=chunk_overlap,
         embedding_model=emb_model,
         index_type=index_type,
+        hybrid_cfg=hybrid_cfg,
+        runtime_mode=runtime_mode,
+        require_dense_in_formal=require_dense_in_formal,
     )
     return idx
 
 
-def _build_sample_index(sample, retrieval_cfg):
+def _build_sample_index(sample, retrieval_cfg, runtime_mode):
     chunk_size = int(retrieval_cfg.get("chunk_size", 512))
     chunk_overlap = int(retrieval_cfg.get("chunk_overlap", 128))
     emb_model = retrieval_cfg.get("embedding_model", "sentence-transformers")
     index_type = retrieval_cfg.get("sample_index", "lexical")
+    hybrid_cfg = retrieval_cfg.get("hybrid", {})
+    require_dense_in_formal = bool(retrieval_cfg.get("require_dense_in_formal", False))
     docs = sample.get("documents", [])
     chunks = build_chunks_from_documents(
         docs,
@@ -72,7 +88,13 @@ def _build_sample_index(sample, retrieval_cfg):
         chunk_size=chunk_size,
         overlap=chunk_overlap,
     )
-    idx = RetrievalIndex(embedding_model=emb_model, index_type=index_type)
+    idx = RetrievalIndex(
+        embedding_model=emb_model,
+        index_type=index_type,
+        hybrid_cfg=hybrid_cfg,
+        runtime_mode=runtime_mode,
+        require_dense_in_formal=require_dense_in_formal,
+    )
     idx.build(chunks)
     return idx
 
@@ -98,6 +120,7 @@ def main():
     driver = _build_driver(cfg)
     top_k = int(cfg.get("retrieval", {}).get("top_k", 5))
     retrieval_cfg = cfg.get("retrieval", {})
+    runtime_mode = str(args.run_mode).lower()
 
     global_index = None
     if args.retrieval_scope == "global":
@@ -114,7 +137,7 @@ def main():
 
         sample_index = global_index
         if args.retrieval_scope == "sample":
-            sample_index = _build_sample_index(sample, retrieval_cfg)
+            sample_index = _build_sample_index(sample, retrieval_cfg, runtime_mode)
 
         with timer.phase("retrieval"):
             hits = sample_index.search(q, top_k=top_k)

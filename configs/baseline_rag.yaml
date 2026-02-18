@@ -27,6 +27,7 @@ retrieval:
   embedding_model: "sentence-transformers"
   index: "faiss"
   sample_index: "lexical"
+  require_dense_in_formal: true
   chunk_size: 512
   chunk_overlap: 128
   top_k: 5
