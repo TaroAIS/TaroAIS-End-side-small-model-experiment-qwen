@@ -32,7 +32,7 @@ retrieval:
     enable: true
     alpha_dense: 0.65
     alpha_lexical: 0.35
-    max_candidates: 20
+    max_candidates: 16
     dedup_by_chunk_id: true
   chunk_size: 512
   chunk_overlap: 128
@@ -66,10 +66,10 @@ agent:
     enable: true
     short_question_token_threshold: 12
     short_question_max_new_tokens: 176
-    default_max_new_tokens: 256
+    default_max_new_tokens: 248
     task_caps:
       code_qa: 176
-      multi_doc_qa: 200
+      multi_doc_qa: 196
       single_doc_qa: 176
 
   task_overrides:
@@ -100,12 +100,12 @@ agent:
       top_k_init: 3
       top_k_iter: 1
       max_steps: 3
-      max_new_tokens: 208
+      max_new_tokens: 196
       enable_query_rewrite_retry: true
       temperature: 0.25
       low_confidence:
         enable: true
-        min_answer_chars: 28
+        min_answer_chars: 24
         uncertainty_markers:
           - "maybe"
           - "not sure"
@@ -121,7 +121,7 @@ agent:
         enable: true
         max_extra_searches: 1
         top_k_extra: 1
-        force_on_first_final: true
+        force_on_first_final: false
     single_doc_qa:
       top_k_init: 3
       enable_final_refine: true

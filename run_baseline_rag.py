@@ -112,7 +112,7 @@ def main():
 
     cfg = load_yaml(args.config)
     cfg = dict(cfg)
-    cfg["runtime"] = {"run_mode": args.run_mode}
+    cfg["runtime"] = {"run_mode": args.run_mode, "seed": int(args.seed)}
 
     rows = load_jsonl(args.dataset)
     validate_records(rows, schema_path("dataset.schema.json"), context_prefix="dataset")

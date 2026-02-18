@@ -16,6 +16,13 @@ class LocalLLMDriver(object):
         self.base_url = local_cfg.get("base_url", "http://localhost:11434/v1")
         self.timeout = int(local_cfg.get("request_timeout_s", 120))
         self.run_mode = str(runtime_cfg.get("run_mode", "formal")).lower()
+        runtime_seed = runtime_cfg.get("seed")
+        self.runtime_seed = None
+        if runtime_seed is not None:
+            try:
+                self.runtime_seed = int(runtime_seed)
+            except Exception:
+                self.runtime_seed = None
         self.fallback_enable = bool(
             fb_cfg.get("enable", local_cfg.get("use_mock_if_unavailable", True))
         )
@@ -164,6 +171,8 @@ class LocalLLMDriver(object):
             "temperature": float(temperature),
             "max_tokens": int(max_new_tokens),
         }
+        if self.runtime_seed is not None:
+            payload["seed"] = int(self.runtime_seed)
         if system_prompt:
             payload["messages"].append({"role": "system", "content": system_prompt})
         payload["messages"].append({"role": "user", "content": user_prompt})
