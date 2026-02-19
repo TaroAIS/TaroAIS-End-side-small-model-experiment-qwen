@@ -116,6 +116,62 @@ class EdgeReasoningAgent(object):
         return out, applied, note
 
     @staticmethod
+    def _compact_answer(text, question, max_chars=96):
+        src = str(text or "").strip()
+        if not src:
+            return src, False, ""
+        q = str(question or "").strip().lower()
+        out = src
+        notes = []
+
+        # Keep the first sentence by default to reduce verbose tails.
+        parts = re.split(r"(?<=[\.\!\?。！？])\s+", out)
+        if len(parts) >= 2 and len(parts[0].strip()) >= 4:
+            out = parts[0].strip()
+            notes.append("first_sentence")
+
+        # Extract concise spans for common QA patterns.
+        span_patterns = []
+        if q.startswith("where"):
+            span_patterns += [r"\b(?:born|located|in)\s+in\s+([^.;,\n]+(?:,\s*[^.;,\n]+)?)"]
+        if q.startswith("who"):
+            span_patterns += [r"\bwas\s+([^.;,\n]+)", r"\bis\s+([^.;,\n]+)"]
+        if "position" in q:
+            span_patterns += [r"\bposition of\s+([^.;,\n]+)"]
+        span_patterns += [r"\bwas born in\s+([^.;,\n]+(?:,\s*[^.;,\n]+)?)"]
+
+        for pat in span_patterns:
+            m = re.search(pat, src, flags=re.I)
+            if m:
+                candidate = (m.group(1) or "").strip(" .,:;")
+                if candidate:
+                    out = candidate
+                    notes.append("regex_span")
+                    break
+
+        # Remove markdown emphasis and excess spaces.
+        out = re.sub(r"[*_`]+", "", out)
+        out = " ".join(out.split()).strip(" ,;")
+        if len(out) > int(max_chars):
+            out = out[: int(max_chars)].rstrip(" ,;")
+            notes.append("trim_len")
+
+        return out, (out != src), ";".join(sorted(set(notes)))
+
+    @staticmethod
+    def _is_single_doc_generic_question(question, cfg):
+        cfg = cfg or {}
+        if not bool(cfg.get("enable", False)):
+            return False, ""
+        text = str(question or "").strip().lower()
+        patterns = cfg.get("patterns", []) or []
+        for p in patterns:
+            pat = str(p or "").strip().lower()
+            if pat and pat in text:
+                return True, pat
+        return False, ""
+
+    @staticmethod
     def _is_low_confidence_final(pred, question, cfg):
         cfg = cfg or {}
         text = str(pred or "").strip()
@@ -197,6 +253,8 @@ class EdgeReasoningAgent(object):
         model_cfg = self.cfg.get("model", {})
         model_decoding_cfg = model_cfg.get("decoding", {})
         logging_cfg = self.cfg.get("logging", {})
+        answer_top_p = float(model_decoding_cfg.get("top_p", 1.0))
+        answer_top_k = int(model_decoding_cfg.get("top_k", 0))
 
         base_max_steps = int(agent_cfg.get("max_steps", 6))
         top_k_init = int(retrieval_cfg.get("top_k_init", 3))
@@ -215,6 +273,14 @@ class EdgeReasoningAgent(object):
         enable_query_rewrite_retry = bool(early_stop_cfg.get("enable_query_rewrite_retry", True))
         format_repair_enable = bool(format_repair_cfg.get("enable", True))
         format_repair_max_retries = max(0, int(format_repair_cfg.get("max_retries", 1)))
+        protocol_decoding_cfg = agent_cfg.get("protocol_decoding", {}) or {}
+        answer_postprocess_cfg = agent_cfg.get("answer_postprocess", {}) or {}
+        single_doc_generic_cfg = agent_cfg.get("single_doc_generic", {}) or {}
+        answer_postprocess_enable = bool(answer_postprocess_cfg.get("enable", False))
+        answer_postprocess_max_chars = int(answer_postprocess_cfg.get("max_chars", 96))
+        single_doc_compact_enable = bool(answer_postprocess_cfg.get("single_doc_compact", False))
+        entity_compact_cfg = answer_postprocess_cfg.get("entity_compact", {}) or {}
+        entity_compact_enable = bool(entity_compact_cfg.get("enable", False))
         task_overrides = agent_cfg.get("task_overrides", {})
         single_doc_override = {}
         code_override = {}
@@ -233,6 +299,7 @@ class EdgeReasoningAgent(object):
         single_doc_refine_temperature = float(
             single_doc_override.get("final_refine_temperature", 0.2)
         )
+        single_doc_always_refine = bool(single_doc_override.get("always_refine", False))
         decoding_budget_cfg = agent_cfg.get("decoding_budget", {}) or {}
         decoding_budget_enable = bool(decoding_budget_cfg.get("enable", False))
         short_question_token_threshold = int(
@@ -258,6 +325,8 @@ class EdgeReasoningAgent(object):
         if isinstance(task_override, dict) and task_override.get("max_new_tokens") is not None:
             effective_max_new_tokens = int(task_override.get("max_new_tokens"))
         effective_max_new_tokens_pre_budget = int(effective_max_new_tokens)
+        query_token_count = len(self._query_tokens(question))
+        short_question_budget_applied = False
         if decoding_budget_enable:
             if budget_default_max_new_tokens is not None:
                 effective_max_new_tokens = min(
@@ -267,10 +336,11 @@ class EdgeReasoningAgent(object):
                 effective_max_new_tokens = min(
                     effective_max_new_tokens, int(budget_task_caps.get(task))
                 )
-            if len(self._query_tokens(question)) <= max(1, short_question_token_threshold):
+            if query_token_count <= max(1, short_question_token_threshold):
                 effective_max_new_tokens = min(
                     effective_max_new_tokens, max(32, short_question_max_new_tokens)
                 )
+                short_question_budget_applied = True
         effective_top_k_init = top_k_init
         effective_top_k_iter = top_k_iter
         effective_max_steps = base_max_steps
@@ -315,12 +385,34 @@ class EdgeReasoningAgent(object):
         long_context_shortcut = bool(
             long_context_cfg.get("enable_single_doc_shortcut", False)
         )
+        long_context_disable_refine = bool(
+            long_context_cfg.get("disable_refine_over_threshold", False)
+        )
+        long_context_disable_forced_retrieve = bool(
+            long_context_cfg.get("disable_forced_retrieve_over_threshold", False)
+        )
         task_enable_query_rewrite_retry = bool(enable_query_rewrite_retry)
+        task_rewrite_requires_no_new = False
         if task == "multi_doc_qa" and isinstance(multi_doc_override, dict):
             if multi_doc_override.get("enable_query_rewrite_retry") is not None:
                 task_enable_query_rewrite_retry = bool(
                     multi_doc_override.get("enable_query_rewrite_retry")
                 )
+            task_rewrite_requires_no_new = bool(
+                multi_doc_override.get("rewrite_requires_no_new_chunks", True)
+            )
+        single_doc_generic_applied = False
+        single_doc_generic_pattern = ""
+        if task == "single_doc_qa":
+            single_doc_generic_applied, single_doc_generic_pattern = self._is_single_doc_generic_question(
+                question, single_doc_generic_cfg
+            )
+            if single_doc_generic_applied:
+                generic_max_steps = int(single_doc_generic_cfg.get("max_steps", 2))
+                effective_max_steps = min(effective_max_steps, max(1, generic_max_steps))
+                if bool(single_doc_generic_cfg.get("disable_refine", True)):
+                    enable_single_doc_final_refine = False
+                task_forced_retrieve_enable = False
 
         context_chars = int(
             sum([len((d or {}).get("text", "")) for d in sample.get("documents", [])])
@@ -334,6 +426,32 @@ class EdgeReasoningAgent(object):
                 effective_top_k_init = max(effective_top_k_init, long_context_top_k_init)
                 effective_max_steps = max(effective_max_steps, long_context_max_steps)
                 effective_enable_single_doc_shortcut = long_context_shortcut
+                if long_context_disable_forced_retrieve:
+                    task_forced_retrieve_enable = False
+                if long_context_disable_refine:
+                    enable_single_doc_final_refine = False
+
+        budget_profile = {
+            "query_token_count": int(query_token_count),
+            "short_question_budget_applied": bool(short_question_budget_applied),
+            "pre_budget_max_new_tokens": int(effective_max_new_tokens_pre_budget),
+            "post_budget_max_new_tokens": int(effective_max_new_tokens),
+            "default_budget_cap": int(budget_default_max_new_tokens)
+            if budget_default_max_new_tokens is not None
+            else 0,
+            "task_budget_cap": int(budget_task_caps.get(task))
+            if isinstance(budget_task_caps, dict) and budget_task_caps.get(task) is not None
+            else 0,
+        }
+
+        protocol_temperature = float(
+            protocol_decoding_cfg.get("temperature", effective_temperature)
+        )
+        protocol_top_p = float(protocol_decoding_cfg.get("top_p", answer_top_p))
+        protocol_top_k = int(protocol_decoding_cfg.get("top_k", answer_top_k))
+        protocol_max_new_tokens = int(
+            protocol_decoding_cfg.get("max_new_tokens", effective_max_new_tokens)
+        )
 
         timer = PhaseTimer()
         monitor = NvmlMonitor(sample_ms=logging_cfg.get("nvml_sample_ms", 200))
@@ -349,9 +467,16 @@ class EdgeReasoningAgent(object):
             "effective_temperature": float(effective_temperature),
             "effective_max_new_tokens": int(effective_max_new_tokens),
             "effective_max_new_tokens_pre_budget": int(effective_max_new_tokens_pre_budget),
+            "protocol_temperature": float(protocol_temperature),
+            "protocol_top_p": float(protocol_top_p),
+            "protocol_top_k": int(protocol_top_k),
+            "protocol_max_new_tokens": int(protocol_max_new_tokens),
             "decoding_budget_enabled": bool(decoding_budget_enable),
             "context_chars": int(context_chars),
             "long_context_applied": bool(long_context_applied),
+            "single_doc_generic_applied": bool(single_doc_generic_applied),
+            "single_doc_generic_pattern": single_doc_generic_pattern,
+            "budget_profile": budget_profile,
         }
 
         with timer.phase("retrieval"):
@@ -406,8 +531,10 @@ class EdgeReasoningAgent(object):
                     raw = self.llm.generate(
                         prompt,
                         expect_protocol=True,
-                        temperature=effective_temperature,
-                        max_new_tokens=effective_max_new_tokens,
+                        temperature=protocol_temperature,
+                        top_p=protocol_top_p,
+                        top_k=protocol_top_k,
+                        max_new_tokens=protocol_max_new_tokens,
                     )
             completion_tokens_total += _approx_tokens(raw)
             tag, content = parse_protocol_output(raw)
@@ -430,8 +557,10 @@ class EdgeReasoningAgent(object):
                         repaired_raw = self.llm.generate(
                             repair_prompt,
                             expect_protocol=True,
-                            temperature=effective_temperature,
-                            max_new_tokens=effective_max_new_tokens,
+                            temperature=protocol_temperature,
+                            top_p=protocol_top_p,
+                            top_k=protocol_top_k,
+                            max_new_tokens=protocol_max_new_tokens,
                         )
                     completion_tokens_total += _approx_tokens(repaired_raw)
                     repair_attempts += 1
@@ -531,6 +660,10 @@ class EdgeReasoningAgent(object):
                         (same_keyword_hits >= max_same_keyword_hits)
                         or (no_new_chunk_steps >= max_no_new_chunk_steps)
                     )
+                    if task == "multi_doc_qa" and task_rewrite_requires_no_new:
+                        rewrite_triggered = bool(
+                            no_new_chunk_steps >= max_no_new_chunk_steps
+                        )
                     if (
                         early_stop_enable
                         and task_enable_query_rewrite_retry
@@ -664,17 +797,61 @@ class EdgeReasoningAgent(object):
         postprocess_note = ""
         if task == "single_doc_qa":
             pred, postprocess_applied, postprocess_note = self._clean_single_doc_answer(pred)
+            if answer_postprocess_enable and single_doc_compact_enable:
+                compact_pred, compact_applied, compact_note = self._compact_answer(
+                    pred,
+                    question,
+                    max_chars=answer_postprocess_max_chars,
+                )
+                if compact_applied:
+                    pred = compact_pred
+                    postprocess_applied = True
+                    if postprocess_note:
+                        postprocess_note = "{};{}".format(postprocess_note, compact_note)
+                    else:
+                        postprocess_note = compact_note
+        if (
+            task in ("multi_doc_qa", "code_qa")
+            and answer_postprocess_enable
+            and entity_compact_enable
+        ):
+            compact_pred, compact_applied, compact_note = self._compact_answer(
+                pred,
+                question,
+                max_chars=answer_postprocess_max_chars,
+            )
+            if compact_applied:
+                pred = compact_pred
+                if postprocess_note:
+                    postprocess_note = "{};{}".format(postprocess_note, compact_note)
+                else:
+                    postprocess_note = compact_note
+                postprocess_applied = True
 
         single_doc_refined = False
         single_doc_refine_reason = ""
+        refine_triggered = False
+        refine_skip_reason = ""
+        if task == "single_doc_qa" and not enable_single_doc_final_refine:
+            if long_context_applied and long_context_disable_refine:
+                refine_skip_reason = "long_context_guard"
+            else:
+                refine_skip_reason = "disabled_by_config"
         if task == "single_doc_qa" and enable_single_doc_final_refine and trace.get("steps"):
             last_step = trace["steps"][-1] or {}
             pred_text = (pred or "").strip()
-            low_confidence = bool(last_step.get("forced_final")) or bool(
-                last_step.get("format_repair_failed")
-            ) or bool(last_step.get("low_confidence_detected")) or len(pred_text) < 24
+            low_confidence = (
+                bool(single_doc_always_refine)
+                or
+                bool(last_step.get("format_repair_failed"))
+                or bool(last_step.get("low_confidence_detected"))
+                or bool(last_step.get("forced_final"))
+                or len(pred_text) < 24
+            )
             if low_confidence:
                 reason_parts = []
+                if single_doc_always_refine:
+                    reason_parts.append("always_refine")
                 if last_step.get("forced_final"):
                     reason_parts.append("forced_final")
                 if last_step.get("format_repair_failed"):
@@ -685,15 +862,20 @@ class EdgeReasoningAgent(object):
                     )
                 if len(pred_text) < 24:
                     reason_parts.append("short_pred")
+                if not reason_parts:
+                    reason_parts.append("low_confidence")
 
                 refine_evidence = format_evidence_chunks(memory.chunks, injection_cfg=inject_cfg)
                 refine_prompt = build_baseline_prompt(question, refine_evidence)
+                refine_triggered = True
                 prompt_tokens_total += _approx_tokens(refine_prompt)
                 with timer.phase("llm"):
                     refined_pred = self.llm.generate(
                         refine_prompt,
                         expect_protocol=False,
                         temperature=single_doc_refine_temperature,
+                        top_p=answer_top_p,
+                        top_k=answer_top_k,
                         max_new_tokens=single_doc_refine_max_new_tokens,
                     )
                 completion_tokens_total += _approx_tokens(refined_pred)
@@ -708,9 +890,13 @@ class EdgeReasoningAgent(object):
                             postprocess_note = refined_post_note
                     single_doc_refined = True
                 single_doc_refine_reason = ";".join(reason_parts)
+            else:
+                refine_skip_reason = "low_confidence_gate_not_met"
 
         trace["single_doc_refined"] = bool(single_doc_refined)
         trace["single_doc_refine_reason"] = single_doc_refine_reason
+        trace["refine_triggered"] = bool(refine_triggered)
+        trace["refine_skip_reason"] = refine_skip_reason
         trace["postprocess_applied"] = bool(postprocess_applied)
         trace["postprocess_note"] = postprocess_note
 
@@ -753,12 +939,15 @@ class EdgeReasoningAgent(object):
             "backend_mode": getattr(self.llm, "backend_mode", "unknown"),
             "single_doc_refined": bool(single_doc_refined),
             "single_doc_refine_reason": single_doc_refine_reason,
+            "refine_triggered": bool(refine_triggered),
+            "refine_skip_reason": refine_skip_reason,
             "low_confidence_detected": bool(low_confidence_detected_any),
             "low_confidence_reason": last_step.get("low_confidence_reason", ""),
             "forced_search_applied": bool(forced_search_applied_any),
             "forced_search_keyword": "|".join(forced_search_keywords),
             "postprocess_applied": bool(postprocess_applied),
             "postprocess_note": postprocess_note,
+            "budget_profile": budget_profile,
         }
 
         if trace_path:
