@@ -70,6 +70,58 @@ class EdgeReasoningAgent(object):
         return (str(fallback or "").strip() or str(question or "").strip())
 
     @staticmethod
+    def _single_doc_answer_type(question, cfg):
+        cfg = cfg or {}
+        q = str(question or "").strip().lower()
+        if not q:
+            return "open_text"
+        if not bool(cfg.get("enable", True)):
+            return "open_text"
+
+        count_markers = cfg.get(
+            "count_markers",
+            ["how many", "number of", "count", "多少", "几个", "几种", "数量"],
+        )
+        paragraph_markers = cfg.get(
+            "paragraph_markers",
+            ["paragraph", "段落", "第几段", "哪一段"],
+        )
+        entity_markers = cfg.get(
+            "entity_markers",
+            ["who", "where", "when", "which", "what", "谁", "哪里", "哪位", "何时", "哪个"],
+        )
+
+        for marker in count_markers:
+            m = str(marker or "").strip().lower()
+            if m and m in q:
+                return "count"
+        for marker in paragraph_markers:
+            m = str(marker or "").strip().lower()
+            if m and m in q:
+                return "paragraph_id"
+        for marker in entity_markers:
+            m = str(marker or "").strip().lower()
+            if m and (q.startswith(m) or m in q):
+                return "entity_short"
+        return "open_text"
+
+    @classmethod
+    def _evidence_overlap_score(cls, question, chunks):
+        q_tokens = set(cls._query_tokens(question))
+        if not q_tokens:
+            return 0.0
+        best = 0.0
+        for c in chunks or []:
+            text = str((c or {}).get("text", "") or "")
+            c_tokens = set(cls._query_tokens(text))
+            if not c_tokens:
+                continue
+            score = float(len(q_tokens & c_tokens)) / float(len(q_tokens))
+            if score > best:
+                best = score
+        return float(best)
+
+    @staticmethod
     def _clean_single_doc_answer(text):
         src = str(text or "").strip()
         if not src:
@@ -300,6 +352,30 @@ class EdgeReasoningAgent(object):
             single_doc_override.get("final_refine_temperature", 0.2)
         )
         single_doc_always_refine = bool(single_doc_override.get("always_refine", False))
+        answer_type_policy_cfg = single_doc_override.get("answer_type_policy", {}) or {}
+        fastpath_types = set(
+            [
+                str(x or "").strip().lower()
+                for x in answer_type_policy_cfg.get(
+                    "fastpath_types",
+                    ["count", "paragraph_id", "entity_short"],
+                )
+            ]
+        )
+        fastpath_max_steps = max(1, int(answer_type_policy_cfg.get("fastpath_max_steps", 2)))
+        fastpath_disable_refine = bool(answer_type_policy_cfg.get("fastpath_disable_refine", True))
+        fastpath_overlap_threshold = float(
+            answer_type_policy_cfg.get("forced_retrieve_overlap_threshold", 0.12)
+        )
+        fastpath_min_answer_chars = max(
+            1, int(answer_type_policy_cfg.get("fastpath_min_answer_chars", 1))
+        )
+        refine_gate_cfg = single_doc_override.get("refine_gate", {}) or {}
+        refine_on_format_repair_failed = bool(
+            refine_gate_cfg.get("on_format_repair_failed", True)
+        )
+        refine_on_uncertainty = bool(refine_gate_cfg.get("on_uncertainty_marker", True))
+        refine_on_forced_final = bool(refine_gate_cfg.get("on_forced_final", False))
         decoding_budget_cfg = agent_cfg.get("decoding_budget", {}) or {}
         decoding_budget_enable = bool(decoding_budget_cfg.get("enable", False))
         short_question_token_threshold = int(
@@ -403,7 +479,19 @@ class EdgeReasoningAgent(object):
             )
         single_doc_generic_applied = False
         single_doc_generic_pattern = ""
+        single_doc_answer_type = "open_text"
+        single_doc_fastpath_applied = False
+        refine_block_reason = ""
         if task == "single_doc_qa":
+            single_doc_answer_type = self._single_doc_answer_type(
+                question, answer_type_policy_cfg
+            )
+            if single_doc_answer_type in fastpath_types:
+                single_doc_fastpath_applied = True
+                effective_max_steps = min(effective_max_steps, fastpath_max_steps)
+                if fastpath_disable_refine:
+                    enable_single_doc_final_refine = False
+                    refine_block_reason = "fastpath_disable_refine"
             single_doc_generic_applied, single_doc_generic_pattern = self._is_single_doc_generic_question(
                 question, single_doc_generic_cfg
             )
@@ -412,6 +500,8 @@ class EdgeReasoningAgent(object):
                 effective_max_steps = min(effective_max_steps, max(1, generic_max_steps))
                 if bool(single_doc_generic_cfg.get("disable_refine", True)):
                     enable_single_doc_final_refine = False
+                    if not refine_block_reason:
+                        refine_block_reason = "single_doc_generic_disable_refine"
                 task_forced_retrieve_enable = False
 
         context_chars = int(
@@ -430,6 +520,8 @@ class EdgeReasoningAgent(object):
                     task_forced_retrieve_enable = False
                 if long_context_disable_refine:
                     enable_single_doc_final_refine = False
+                    if not refine_block_reason:
+                        refine_block_reason = "long_context_disable_refine"
 
         budget_profile = {
             "query_token_count": int(query_token_count),
@@ -476,6 +568,9 @@ class EdgeReasoningAgent(object):
             "long_context_applied": bool(long_context_applied),
             "single_doc_generic_applied": bool(single_doc_generic_applied),
             "single_doc_generic_pattern": single_doc_generic_pattern,
+            "single_doc_answer_type": single_doc_answer_type,
+            "single_doc_fastpath_applied": bool(single_doc_fastpath_applied),
+            "refine_block_reason": refine_block_reason,
             "budget_profile": budget_profile,
         }
 
@@ -496,6 +591,8 @@ class EdgeReasoningAgent(object):
         rewrite_used = False
 
         forced_search_count = 0
+        fallback_max_chars = 64 if task == "single_doc_qa" else 96
+        last_evidence_overlap_score = self._evidence_overlap_score(question, memory.chunks)
 
         for step in range(1, effective_max_steps + 1):
             monitor.sample()
@@ -573,7 +670,12 @@ class EdgeReasoningAgent(object):
             if tag is None:
                 format_repair_failed = True
                 tag = "final"
-                content = memory.best_answer_from_chunks(question)
+                content = memory.best_answer_from_chunks(
+                    question,
+                    task=task,
+                    answer_type=single_doc_answer_type,
+                    max_chars=fallback_max_chars,
+                )
                 error_count += 1
 
             step_info = {
@@ -598,6 +700,10 @@ class EdgeReasoningAgent(object):
                 "forced_search_new_chunk_ids": [],
                 "forced_final": False,
                 "early_stop_reason": "",
+                "answer_type": single_doc_answer_type,
+                "fastpath_applied": bool(single_doc_fastpath_applied),
+                "evidence_overlap_score": float(last_evidence_overlap_score),
+                "refine_block_reason": refine_block_reason,
             }
 
             if tag == "search":
@@ -635,6 +741,8 @@ class EdgeReasoningAgent(object):
                 step_info["no_new_chunk_steps"] = int(no_new_chunk_steps)
                 step_info["facts"] = facts
                 step_info["dropped_after"] = dropped_after
+                last_evidence_overlap_score = self._evidence_overlap_score(question, memory.chunks)
+                step_info["evidence_overlap_score"] = float(last_evidence_overlap_score)
 
                 early_stop_reasons = []
                 if early_stop_enable:
@@ -668,6 +776,7 @@ class EdgeReasoningAgent(object):
                         early_stop_enable
                         and task_enable_query_rewrite_retry
                         and rewrite_triggered
+                        and (task != "multi_doc_qa" or step > 1)
                         and (not rewrite_used)
                     ):
                         rewrite_keyword = self._rewrite_search_query(question, keyword)
@@ -707,6 +816,10 @@ class EdgeReasoningAgent(object):
                             step_info["rewrite_dropped_after"] = rewrite_dropped_after
                             step_info["same_keyword_hits"] = int(same_keyword_hits)
                             step_info["no_new_chunk_steps"] = int(no_new_chunk_steps)
+                            last_evidence_overlap_score = self._evidence_overlap_score(
+                                question, memory.chunks
+                            )
+                            step_info["evidence_overlap_score"] = float(last_evidence_overlap_score)
 
                             early_stop_reasons = []
                             if same_keyword_hits >= max_same_keyword_hits:
@@ -727,7 +840,12 @@ class EdgeReasoningAgent(object):
                                 )
 
                     if early_stop_reasons:
-                        pred = memory.best_answer_from_chunks(question)
+                        pred = memory.best_answer_from_chunks(
+                            question,
+                            task=task,
+                            answer_type=single_doc_answer_type,
+                            max_chars=fallback_max_chars,
+                        )
                         step_info["forced_final"] = True
                         step_info["early_stop_reason"] = ";".join(early_stop_reasons)
                         trace["steps"].append(step_info)
@@ -736,19 +854,33 @@ class EdgeReasoningAgent(object):
                 trace["steps"].append(step_info)
                 continue
 
-            pred_candidate = content.strip() or memory.best_answer_from_chunks(question)
+            pred_candidate = content.strip() or memory.best_answer_from_chunks(
+                question,
+                task=task,
+                answer_type=single_doc_answer_type,
+                max_chars=fallback_max_chars,
+            )
             low_confidence_detected = False
             low_confidence_reason = ""
             if task_low_conf_enable:
+                effective_low_conf_cfg = dict(task_low_conf_cfg or {})
+                if task == "single_doc_qa" and single_doc_fastpath_applied:
+                    effective_low_conf_cfg["min_answer_chars"] = int(fastpath_min_answer_chars)
                 low_confidence_detected, low_confidence_reason = self._is_low_confidence_final(
                     pred_candidate,
                     question,
-                    task_low_conf_cfg,
+                    effective_low_conf_cfg,
                 )
             step_info["low_confidence_detected"] = bool(low_confidence_detected)
             step_info["low_confidence_reason"] = low_confidence_reason
+            last_evidence_overlap_score = self._evidence_overlap_score(question, memory.chunks)
+            step_info["evidence_overlap_score"] = float(last_evidence_overlap_score)
 
             force_retrieve_hit = bool(low_confidence_detected or task_force_on_first_final)
+            if task == "single_doc_qa" and single_doc_fastpath_applied:
+                force_retrieve_hit = bool(
+                    last_evidence_overlap_score < float(fastpath_overlap_threshold)
+                )
             if (
                 tag == "final"
                 and step == 1
@@ -783,6 +915,8 @@ class EdgeReasoningAgent(object):
                 step_info["forced_search_hits"] = [h.get("chunk_id", "") for h in forced_hits]
                 step_info["forced_search_new_chunk_ids"] = forced_new_chunk_ids
                 step_info["forced_search_dropped_after"] = forced_dropped_after
+                last_evidence_overlap_score = self._evidence_overlap_score(question, memory.chunks)
+                step_info["evidence_overlap_score"] = float(last_evidence_overlap_score)
                 trace["steps"].append(step_info)
                 continue
 
@@ -791,7 +925,12 @@ class EdgeReasoningAgent(object):
             break
 
         if not pred:
-            pred = memory.best_answer_from_chunks(question)
+            pred = memory.best_answer_from_chunks(
+                question,
+                task=task,
+                answer_type=single_doc_answer_type,
+                max_chars=fallback_max_chars,
+            )
 
         postprocess_applied = False
         postprocess_note = ""
@@ -833,35 +972,35 @@ class EdgeReasoningAgent(object):
         refine_triggered = False
         refine_skip_reason = ""
         if task == "single_doc_qa" and not enable_single_doc_final_refine:
-            if long_context_applied and long_context_disable_refine:
+            if refine_block_reason:
+                refine_skip_reason = refine_block_reason
+            elif long_context_applied and long_context_disable_refine:
                 refine_skip_reason = "long_context_guard"
             else:
                 refine_skip_reason = "disabled_by_config"
         if task == "single_doc_qa" and enable_single_doc_final_refine and trace.get("steps"):
             last_step = trace["steps"][-1] or {}
-            pred_text = (pred or "").strip()
-            low_confidence = (
-                bool(single_doc_always_refine)
-                or
-                bool(last_step.get("format_repair_failed"))
-                or bool(last_step.get("low_confidence_detected"))
-                or bool(last_step.get("forced_final"))
-                or len(pred_text) < 24
-            )
+            low_confidence = False
+            if bool(single_doc_always_refine):
+                low_confidence = True
+            if refine_on_format_repair_failed and bool(last_step.get("format_repair_failed")):
+                low_confidence = True
+            if refine_on_uncertainty and bool(last_step.get("low_confidence_detected")):
+                low_confidence = True
+            if refine_on_forced_final and bool(last_step.get("forced_final")):
+                low_confidence = True
             if low_confidence:
                 reason_parts = []
                 if single_doc_always_refine:
                     reason_parts.append("always_refine")
-                if last_step.get("forced_final"):
+                if refine_on_forced_final and last_step.get("forced_final"):
                     reason_parts.append("forced_final")
-                if last_step.get("format_repair_failed"):
+                if refine_on_format_repair_failed and last_step.get("format_repair_failed"):
                     reason_parts.append("format_repair_failed")
-                if last_step.get("low_confidence_detected"):
+                if refine_on_uncertainty and last_step.get("low_confidence_detected"):
                     reason_parts.append(
                         "low_confidence:{}".format(last_step.get("low_confidence_reason", ""))
                     )
-                if len(pred_text) < 24:
-                    reason_parts.append("short_pred")
                 if not reason_parts:
                     reason_parts.append("low_confidence")
 
@@ -891,12 +1030,13 @@ class EdgeReasoningAgent(object):
                     single_doc_refined = True
                 single_doc_refine_reason = ";".join(reason_parts)
             else:
-                refine_skip_reason = "low_confidence_gate_not_met"
+                refine_skip_reason = "refine_gate_not_met"
 
         trace["single_doc_refined"] = bool(single_doc_refined)
         trace["single_doc_refine_reason"] = single_doc_refine_reason
         trace["refine_triggered"] = bool(refine_triggered)
         trace["refine_skip_reason"] = refine_skip_reason
+        trace["refine_block_reason"] = refine_block_reason
         trace["postprocess_applied"] = bool(postprocess_applied)
         trace["postprocess_note"] = postprocess_note
 
@@ -948,6 +1088,10 @@ class EdgeReasoningAgent(object):
             "postprocess_applied": bool(postprocess_applied),
             "postprocess_note": postprocess_note,
             "budget_profile": budget_profile,
+            "answer_type": single_doc_answer_type,
+            "fastpath_applied": bool(single_doc_fastpath_applied),
+            "evidence_overlap_score": float(last_evidence_overlap_score),
+            "refine_block_reason": refine_block_reason,
         }
 
         if trace_path:

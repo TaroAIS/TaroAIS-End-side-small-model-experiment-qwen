@@ -53,9 +53,9 @@ agent:
     enable: true
     max_retries: 2
   protocol_decoding:
-    temperature: 0.35
-    top_p: 0.95
-    top_k: 40
+    temperature: 0.0
+    top_p: 1.0
+    top_k: 1
     max_new_tokens: 128
   answer_postprocess:
     enable: true
@@ -83,6 +83,9 @@ agent:
       code_qa: 176
       multi_doc_qa: 176
       single_doc_qa: 160
+    dev_guard:
+      target_p95_ratio: 2.30
+      target_single_doc_f1: 0.24
   task_overrides:
     code_qa:
       top_k_init: 4
@@ -141,6 +144,20 @@ agent:
       always_refine: false
       final_refine_max_new_tokens: 192
       final_refine_temperature: 0.2
+      answer_type_policy:
+        enable: true
+        fastpath_types:
+        - count
+        - paragraph_id
+        - entity_short
+        fastpath_max_steps: 2
+        fastpath_disable_refine: true
+        forced_retrieve_overlap_threshold: 0.12
+        fastpath_min_answer_chars: 1
+      refine_gate:
+        on_format_repair_failed: true
+        on_uncertainty_marker: true
+        on_forced_final: false
       low_confidence:
         enable: true
         min_answer_chars: 24

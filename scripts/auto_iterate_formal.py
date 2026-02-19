@@ -12,8 +12,11 @@ from pathlib import Path
 
 import yaml
 
-
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from metrics.qa_metrics import best_over_gold
 
 
 def _now_ts():
@@ -41,6 +44,39 @@ def _read_csv_rows(path):
         for row in r:
             rows.append(dict(row))
     return rows
+
+
+def _read_jsonl_rows(path):
+    rows = []
+    p = Path(path)
+    if not p.exists():
+        return rows
+    with open(p, "r", encoding="utf-8") as f:
+        for line in f:
+            s = line.strip()
+            if not s:
+                continue
+            try:
+                rows.append(json.loads(s))
+            except Exception:
+                continue
+    return rows
+
+
+def _load_state(path):
+    p = Path(path)
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_state(path, state):
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _run(cmd, cwd=ROOT):
@@ -152,6 +188,79 @@ def _collect_trace_stats(trace_dir):
                 early_counter[reason] += 1
     stats["early_stop_reason_top"] = early_counter.most_common(5)
     return stats
+
+
+def _gold_map(dataset_path):
+    out = {}
+    for row in _read_jsonl_rows(dataset_path):
+        sid = str(row.get("id", "") or "")
+        if not sid:
+            continue
+        out[sid] = {
+            "answer": row.get("answer", ""),
+            "task": row.get("task", "unknown"),
+        }
+    return out
+
+
+def _sample_level_summary(dataset_path, baseline_pred_path, agent_pred_path, top_n=5):
+    gold = _gold_map(dataset_path)
+    baseline_rows = _read_jsonl_rows(baseline_pred_path)
+    agent_rows = _read_jsonl_rows(agent_pred_path)
+    base_map = {str(r.get("id", "") or ""): r for r in baseline_rows}
+    agent_map = {str(r.get("id", "") or ""): r for r in agent_rows}
+
+    deltas = []
+    for sid, arow in agent_map.items():
+        if sid not in base_map:
+            continue
+        info = gold.get(sid, {})
+        answer = info.get("answer", arow.get("gold", ""))
+        task = info.get("task", "unknown")
+        _, bf1 = best_over_gold(str(base_map[sid].get("pred", "")), answer)
+        _, af1 = best_over_gold(str(arow.get("pred", "")), answer)
+        deltas.append(
+            {
+                "id": sid,
+                "task": task,
+                "baseline_f1": float(bf1),
+                "agent_f1": float(af1),
+                "delta_f1": float(af1 - bf1),
+            }
+        )
+
+    regressions = sorted(
+        [x for x in deltas if x["delta_f1"] < 0.0], key=lambda x: x["delta_f1"]
+    )[: max(1, int(top_n))]
+    improvements = sorted(
+        [x for x in deltas if x["delta_f1"] > 0.0],
+        key=lambda x: x["delta_f1"],
+        reverse=True,
+    )[: max(1, int(top_n))]
+
+    latency_top = []
+    for row in agent_rows:
+        sid = str(row.get("id", "") or "")
+        task = gold.get(sid, {}).get("task", "unknown")
+        lt = row.get("latency_ms", {}) or {}
+        latency_top.append(
+            {
+                "id": sid,
+                "task": task,
+                "latency_ms": _safe_float(lt.get("total", 0.0)),
+                "n_steps": _safe_int(row.get("n_steps", 0)),
+                "n_retrieval": _safe_int(row.get("n_retrieval", 0)),
+            }
+        )
+    latency_top = sorted(latency_top, key=lambda x: x["latency_ms"], reverse=True)[
+        : max(1, int(top_n))
+    ]
+
+    return {
+        "regression_top": regressions,
+        "improvement_top": improvements,
+        "latency_top": latency_top,
+    }
 
 
 def _single_gate(m, thresholds):
@@ -358,8 +467,21 @@ def _run_agent_eval_single(
     parsed["tag"] = tag
     parsed["dataset_tag"] = dataset_tag
     parsed["agent_pred"] = str(agent_pred)
+    parsed["baseline_pred"] = str(baseline_anchor)
     parsed["trace_dir"] = str(trace_dir) if trace_dir else ""
     parsed["trace_stats"] = _collect_trace_stats(trace_dir)
+    sample_summary = _sample_level_summary(
+        dataset_path=dataset,
+        baseline_pred_path=baseline_anchor,
+        agent_pred_path=str(agent_pred),
+        top_n=5,
+    )
+    sample_summary_path = Path(report_dir) / "sample_level_summary.json"
+    sample_summary_path.write_text(
+        json.dumps(sample_summary, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    parsed["sample_summary"] = sample_summary
+    parsed["sample_summary_path"] = str(sample_summary_path)
     return parsed
 
 
@@ -476,6 +598,9 @@ def _apply_auto_policy(config_path, canonical_m, canonical_gate, dev_m):
     hybrid = retrieval.setdefault("hybrid", {})
     decoding_budget = agent_cfg.setdefault("decoding_budget", {})
     task_caps = decoding_budget.setdefault("task_caps", {})
+    dev_guard = decoding_budget.setdefault("dev_guard", {})
+    dev_target_ratio = float(dev_guard.get("target_p95_ratio", 2.30))
+    dev_target_single_doc = float(dev_guard.get("target_single_doc_f1", 0.24))
 
     ratio_fail_only = (
         (not canonical_gate["ratio_pass"])
@@ -486,6 +611,54 @@ def _apply_auto_policy(config_path, canonical_m, canonical_gate, dev_m):
     single_doc_fail = not canonical_gate["single_doc_pass"]
     overall_fail = not canonical_gate["overall_pass"]
     oom_fail = not canonical_gate["oom_pass"]
+    dev_ratio_fail = float(dev_m.get("p95_ratio", 0.0)) > dev_target_ratio
+    dev_single_doc_fail = float(dev_m.get("single_doc_f1", 0.0)) < dev_target_single_doc
+
+    if dev_ratio_fail:
+        forced = single_doc.setdefault("forced_retrieve", {})
+        old_force = int(forced.get("max_extra_searches", 1))
+        if old_force > 0:
+            forced["max_extra_searches"] = old_force - 1
+            actions.append(
+                "dev_guard: single_doc.forced_retrieve.max_extra_searches {}->{}".format(
+                    old_force, old_force - 1
+                )
+            )
+            changed = True
+
+        refine_gate = single_doc.setdefault("refine_gate", {})
+        if bool(refine_gate.get("on_forced_final", False)):
+            refine_gate["on_forced_final"] = False
+            actions.append("dev_guard: single_doc.refine_gate.on_forced_final true->false")
+            changed = True
+
+        answer_type_policy = single_doc.setdefault("answer_type_policy", {})
+        if not bool(answer_type_policy.get("fastpath_disable_refine", True)):
+            answer_type_policy["fastpath_disable_refine"] = True
+            actions.append("dev_guard: single_doc.answer_type_policy.fastpath_disable_refine false->true")
+            changed = True
+
+        long_ctx = single_doc.setdefault("long_context", {})
+        if not bool(long_ctx.get("disable_refine_over_threshold", False)):
+            long_ctx["disable_refine_over_threshold"] = True
+            actions.append("dev_guard: single_doc.long_context.disable_refine_over_threshold false->true")
+            changed = True
+        if not bool(long_ctx.get("disable_forced_retrieve_over_threshold", False)):
+            long_ctx["disable_forced_retrieve_over_threshold"] = True
+            actions.append("dev_guard: single_doc.long_context.disable_forced_retrieve_over_threshold false->true")
+            changed = True
+
+        if bool(multi_doc.get("enable_query_rewrite_retry", True)):
+            multi_doc["enable_query_rewrite_retry"] = False
+            actions.append("dev_guard: multi_doc.enable_query_rewrite_retry true->false")
+            changed = True
+
+    if dev_single_doc_fail:
+        old_topk = int(single_doc.get("top_k_init", 3))
+        if old_topk < 4:
+            single_doc["top_k_init"] = 4
+            actions.append("dev_guard: single_doc.top_k_init {}->4".format(old_topk))
+            changed = True
 
     if ratio_fail_only:
         forced = single_doc.setdefault("forced_retrieve", {})
@@ -643,6 +816,7 @@ def _append_snapshot(
     canonical_result,
     dev_result,
     gate,
+    dev_gate,
     score,
     improved,
     best_score,
@@ -690,6 +864,10 @@ def _append_snapshot(
     lines.append("- canonical single_doc: `{}`".format("pass" if gate["single_doc_pass"] else "fail"))
     lines.append("- canonical ratio: `{}`".format("pass" if gate["ratio_pass"] else "fail"))
     lines.append("- canonical oom: `{}`".format("pass" if gate["oom_pass"] else "fail"))
+    lines.append("- dev overall: `{}`".format("pass" if dev_gate["overall_pass"] else "fail"))
+    lines.append("- dev single_doc: `{}`".format("pass" if dev_gate["single_doc_pass"] else "fail"))
+    lines.append("- dev ratio: `{}`".format("pass" if dev_gate["ratio_pass"] else "fail"))
+    lines.append("- dev oom: `{}`".format("pass" if dev_gate["oom_pass"] else "fail"))
     lines.append("- score: `{:.4f}` (best `{:.4f}`, improved `{}`)".format(score, best_score, str(bool(improved)).lower()))
     lines.append("")
     lines.append("### trace (canonical)")
@@ -703,6 +881,60 @@ def _append_snapshot(
         lines.append("- early_stop_reason_top: `{}`".format(", ".join(["{}={}".format(k, v) for k, v in top_reasons])))
     else:
         lines.append("- early_stop_reason_top: `none`")
+    lines.append("")
+    lines.append("### sample summary")
+    lines.append("- canonical summary: `{}`".format(canonical_result.get("sample_summary_path", "")))
+    can_summary = canonical_result.get("sample_summary", {}) or {}
+    reg_top = can_summary.get("regression_top", []) or []
+    lat_top = can_summary.get("latency_top", []) or []
+    if reg_top:
+        reg_line = ", ".join(
+            [
+                "{}({:.3f})".format(str(x.get("id", "")), float(x.get("delta_f1", 0.0)))
+                for x in reg_top[:3]
+            ]
+        )
+        lines.append("- canonical regression_top3: `{}`".format(reg_line))
+    else:
+        lines.append("- canonical regression_top3: `none`")
+    if lat_top:
+        lat_line = ", ".join(
+            [
+                "{}({:.2f}s)".format(
+                    str(x.get("id", "")), float(x.get("latency_ms", 0.0)) / 1000.0
+                )
+                for x in lat_top[:3]
+            ]
+        )
+        lines.append("- canonical latency_top3: `{}`".format(lat_line))
+    else:
+        lines.append("- canonical latency_top3: `none`")
+    lines.append("- dev summary: `{}`".format(dev_result.get("sample_summary_path", "")))
+    dev_summary = dev_result.get("sample_summary", {}) or {}
+    dev_reg_top = dev_summary.get("regression_top", []) or []
+    dev_lat_top = dev_summary.get("latency_top", []) or []
+    if dev_reg_top:
+        reg_line = ", ".join(
+            [
+                "{}({:.3f})".format(str(x.get("id", "")), float(x.get("delta_f1", 0.0)))
+                for x in dev_reg_top[:3]
+            ]
+        )
+        lines.append("- dev regression_top3: `{}`".format(reg_line))
+    else:
+        lines.append("- dev regression_top3: `none`")
+    if dev_lat_top:
+        lat_line = ", ".join(
+            [
+                "{}({:.2f}s)".format(
+                    str(x.get("id", "")), float(x.get("latency_ms", 0.0)) / 1000.0
+                )
+                for x in dev_lat_top[:3]
+            ]
+        )
+        lines.append("- dev latency_top3: `{}`".format(lat_line))
+    else:
+        lines.append("- dev latency_top3: `none`")
     lines.append("")
     lines.append("### actions")
     if actions:
@@ -791,6 +1023,7 @@ def main():
     parser.add_argument("--single_seed", type=int, default=42)
     parser.add_argument("--multi_seeds", nargs="+", default=["42", "123", "2026"])
     parser.add_argument("--snapshot_doc", default="docs/24_实验快照_当前.md")
+    parser.add_argument("--state_path", default="results/auto_iterate_state.json")
     parser.add_argument("--start_round", type=int, default=1)
     parser.add_argument("--max_rounds", type=int, default=0, help="0 means no hard cap")
     parser.add_argument("--force_multiseed_every", type=int, default=2)
@@ -799,6 +1032,9 @@ def main():
     parser.add_argument("--target_overall_f1", type=float, default=0.37)
     parser.add_argument("--target_single_doc_f1", type=float, default=0.29)
     parser.add_argument("--target_p95_ratio", type=float, default=1.8)
+    parser.add_argument("--dev_target_overall_f1", type=float, default=0.28)
+    parser.add_argument("--dev_target_single_doc_f1", type=float, default=0.24)
+    parser.add_argument("--dev_target_p95_ratio", type=float, default=2.30)
     parser.add_argument("--holdout_target_overall_f1", type=float, default=0.35)
     parser.add_argument("--holdout_target_single_doc_f1", type=float, default=0.27)
     parser.add_argument("--holdout_target_p95_ratio", type=float, default=1.9)
@@ -809,6 +1045,11 @@ def main():
         "overall_f1": float(args.target_overall_f1),
         "single_doc_f1": float(args.target_single_doc_f1),
         "p95_ratio": float(args.target_p95_ratio),
+    }
+    dev_thresholds = {
+        "overall_f1": float(args.dev_target_overall_f1),
+        "single_doc_f1": float(args.dev_target_single_doc_f1),
+        "p95_ratio": float(args.dev_target_p95_ratio),
     }
     holdout_thresholds = {
         "overall_f1": float(args.holdout_target_overall_f1),
@@ -824,6 +1065,7 @@ def main():
         "-m",
         "py_compile",
         "agent/edge_reasoning_agent.py",
+        "agent/memory.py",
         "retrieval/index_faiss.py",
         "llm/driver_local.py",
         "llm/driver_hf.py",
@@ -836,14 +1078,18 @@ def main():
         [py, "evaluate.py", "--help"],
     ]
 
-    best_score = -1e9
-    no_improve_streak = 0
-    single_pass_streak = 0
-    canonical_multi_pass_streak = 0
-    holdout_last_pass = False
-    rounds_since_multi = 0
+    state_file = ROOT / args.state_path
+    state = _load_state(state_file)
+    best_score = float(state.get("best_score", -1e9))
+    no_improve_streak = int(state.get("no_improve_streak", 0))
+    single_pass_streak = int(state.get("single_pass_streak", 0))
+    canonical_multi_pass_streak = int(state.get("canonical_multi_pass_streak", 0))
+    holdout_last_pass = bool(state.get("holdout_last_pass", False))
+    rounds_since_multi = int(state.get("rounds_since_multi", 0))
 
     round_idx = int(args.start_round)
+    if int(args.start_round) <= 1 and state.get("next_round") is not None:
+        round_idx = int(state.get("next_round"))
     rounds_run = 0
     while True:
         if args.max_rounds > 0 and rounds_run >= args.max_rounds:
@@ -878,7 +1124,8 @@ def main():
         )
 
         gate = _single_gate(canonical, can_thresholds)
-        gate_pass = _gate_ok(gate)
+        dev_gate = _single_gate(dev, dev_thresholds)
+        gate_pass = _gate_ok(gate) and _gate_ok(dev_gate)
         score = _score(canonical, dev, can_thresholds, holdout_thresholds)
         improved = (score - best_score) >= float(args.min_score_delta)
         if improved:
@@ -949,6 +1196,7 @@ def main():
             canonical_result=canonical,
             dev_result=dev,
             gate=gate,
+            dev_gate=dev_gate,
             score=score,
             improved=improved,
             best_score=best_score,
@@ -956,6 +1204,19 @@ def main():
             canonical_ms=canonical_ms,
             holdout_ms=holdout_ms,
             training_result=training_result,
+        )
+        _save_state(
+            state_file,
+            {
+                "best_score": float(best_score),
+                "no_improve_streak": int(no_improve_streak),
+                "single_pass_streak": int(single_pass_streak),
+                "canonical_multi_pass_streak": int(canonical_multi_pass_streak),
+                "holdout_last_pass": bool(holdout_last_pass),
+                "rounds_since_multi": int(rounds_since_multi),
+                "next_round": int(round_idx + 1),
+                "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            },
         )
 
         print(

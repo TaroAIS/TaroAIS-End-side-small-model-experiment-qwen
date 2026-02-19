@@ -76,9 +76,71 @@ class MemoryStore(object):
         text = (text or "").lower()
         return re.findall(r"[a-zA-Z0-9_]+|[\u4e00-\u9fff]", text)
 
-    def best_answer_from_chunks(self, question):
-        if not self.chunks:
-            return "信息不足，无法确定答案。"
+    @classmethod
+    def _infer_answer_type(cls, question):
+        q = str(question or "").strip().lower()
+        if not q:
+            return "open_text"
+        count_markers = ["how many", "number of", "count", "多少", "几个", "几种", "数量"]
+        for marker in count_markers:
+            if marker in q:
+                return "count"
+        paragraph_markers = ["paragraph", "段落", "第几段", "哪一段"]
+        for marker in paragraph_markers:
+            if marker in q:
+                return "paragraph_id"
+        entity_markers = ["who", "where", "when", "which", "what", "谁", "哪里", "哪位", "何时", "哪个"]
+        if any([q.startswith(m) for m in entity_markers]) or any([m in q for m in entity_markers]):
+            return "entity_short"
+        return "open_text"
+
+    @staticmethod
+    def _normalize_numeric(text):
+        value = str(text or "").strip()
+        if not value:
+            return ""
+        value = value.replace(",", "")
+        if value.endswith(".0"):
+            value = value[:-2]
+        return value
+
+    @classmethod
+    def _extract_number(cls, text):
+        src = str(text or "")
+        m = re.search(r"(?<![a-zA-Z0-9_])(-?\d+(?:[.,]\d+)?)", src)
+        if not m:
+            return ""
+        return cls._normalize_numeric(m.group(1))
+
+    @staticmethod
+    def _extract_paragraph_id(text):
+        src = str(text or "")
+        patterns = [
+            r"(?i)\bparagraph\s*(\d+)\b",
+            r"(?i)\bpara\s*(\d+)\b",
+            r"段落\s*(\d+)",
+            r"第\s*(\d+)\s*段",
+        ]
+        for pat in patterns:
+            m = re.search(pat, src)
+            if m:
+                return str(m.group(1))
+        return ""
+
+    @staticmethod
+    def _extract_entity_short(text, max_chars=48):
+        src = str(text or "").strip()
+        if not src:
+            return ""
+        first = re.split(r"[\n。！？!?]", src)[0].strip()
+        if not first:
+            first = src
+        first = first.strip(" \"'`:,;：；")
+        if len(first) > int(max_chars):
+            first = first[: int(max_chars)].rstrip(" ,:;：；")
+        return first
+
+    def _best_chunk_text(self, question):
         q_tokens = self._tokenize(question)
         best_text = self.chunks[0].get("text", "")
         best_score = -1
@@ -92,7 +154,47 @@ class MemoryStore(object):
             if score > best_score:
                 best_score = score
                 best_text = txt
-        best_text = best_text.strip()
-        if len(best_text) > 220:
-            best_text = best_text[:220]
-        return best_text or "信息不足，无法确定答案。"
+        return str(best_text or "").strip()
+
+    def best_answer_from_chunks(self, question, task=None, answer_type=None, max_chars=None):
+        if not self.chunks:
+            return "信息不足，无法确定答案。"
+        task_name = str(task or "").strip().lower()
+        kind = str(answer_type or "").strip().lower() or self._infer_answer_type(question)
+        if max_chars is None:
+            max_chars = 64 if task_name == "single_doc_qa" else 96
+        max_chars = max(24, int(max_chars))
+
+        best_text = self._best_chunk_text(question)
+        extracted = ""
+
+        if kind == "count":
+            extracted = self._extract_number(best_text)
+            if not extracted:
+                for c in self.chunks:
+                    extracted = self._extract_number(c.get("text", ""))
+                    if extracted:
+                        break
+        elif kind == "paragraph_id":
+            pid = self._extract_paragraph_id(best_text)
+            if not pid:
+                for c in self.chunks:
+                    pid = self._extract_paragraph_id(c.get("text", ""))
+                    if pid:
+                        break
+            if pid:
+                if re.search(r"[\u4e00-\u9fff]", str(question or "")):
+                    extracted = "段落{}".format(pid)
+                else:
+                    extracted = "Paragraph {}".format(pid)
+        elif kind == "entity_short":
+            extracted = self._extract_entity_short(best_text, max_chars=min(48, max_chars))
+
+        fallback = best_text
+        if len(fallback) > max_chars:
+            fallback = fallback[:max_chars].rstrip(" ,:;：；")
+
+        out = str(extracted or fallback).strip()
+        if not out:
+            return "信息不足，无法确定答案。"
+        return out
