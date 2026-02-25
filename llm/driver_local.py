@@ -47,19 +47,30 @@ class LocalLLMDriver(object):
         prompt,
         system_prompt="",
         temperature=None,
+        top_p=None,
+        top_k=None,
         max_new_tokens=None,
+        stop=None,
         expect_protocol=False,
     ):
+        decoding_cfg = self.cfg.get("model", {}).get("decoding", {})
         if temperature is None:
-            temperature = self.cfg.get("model", {}).get("decoding", {}).get("temperature", 0.2)
+            temperature = decoding_cfg.get("temperature", 0.2)
+        if top_p is None:
+            top_p = decoding_cfg.get("top_p", 1.0)
+        if top_k is None:
+            top_k = decoding_cfg.get("top_k", 0)
         if max_new_tokens is None:
-            max_new_tokens = self.cfg.get("model", {}).get("decoding", {}).get("max_new_tokens", 256)
+            max_new_tokens = decoding_cfg.get("max_new_tokens", 256)
 
         content = self._generate_remote(
             prompt=prompt,
             system_prompt=system_prompt,
             temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
             max_new_tokens=max_new_tokens,
+            stop=stop,
             expect_protocol=expect_protocol,
         )
         if content is not None:
@@ -158,19 +169,60 @@ class LocalLLMDriver(object):
                 return m.group(0).strip()
             lines = [x.strip() for x in text.splitlines() if x.strip()]
             tail = lines[-1] if lines else text
+            tail = tail[:512]
             return "<final>{}</final>".format(tail)
         lines = [x.strip() for x in text.splitlines() if x.strip()]
         return (lines[-1] if lines else text).strip() or None
 
-    def _generate_remote(self, prompt, system_prompt, temperature, max_new_tokens, expect_protocol=False):
+    @staticmethod
+    def _normalize_protocol_text(text, max_chars=512):
+        src = str(text or "").strip()
+        if not src:
+            return src
+        m = re.search(r"<\s*(search|final)\s*>(.*?)<\s*/\s*\1\s*>", src, flags=re.I | re.S)
+        if m:
+            tag = m.group(1).lower()
+            body = (m.group(2) or "").strip()
+            body = body[: max(32, int(max_chars))].strip()
+            return "<{}>{}</{}>".format(tag, body, tag)
+        for tag in ("search", "final"):
+            marker = "<{}>".format(tag)
+            pos = src.lower().find(marker)
+            if pos >= 0:
+                body = src[pos + len(marker) :].strip()
+                body = body[: max(32, int(max_chars))].strip()
+                return "<{}>{}</{}>".format(tag, body, tag)
+        return src[: max(32, int(max_chars))]
+
+    def _generate_remote(
+        self,
+        prompt,
+        system_prompt,
+        temperature,
+        top_p,
+        top_k,
+        max_new_tokens,
+        stop=None,
+        expect_protocol=False,
+    ):
         endpoint = self.base_url.rstrip("/") + "/chat/completions"
         user_prompt = self._apply_soft_switch(prompt, expect_protocol=expect_protocol)
+        temp = float(temperature)
         payload = {
             "model": self.model,
             "messages": [],
-            "temperature": float(temperature),
             "max_tokens": int(max_new_tokens),
         }
+        if temp <= 0.0:
+            payload["temperature"] = 0.0
+            payload["top_p"] = 1.0
+            payload["top_k"] = 1
+        else:
+            payload["temperature"] = temp
+            payload["top_p"] = float(top_p) if top_p is not None else 1.0
+            payload["top_k"] = max(0, int(top_k)) if top_k is not None else 0
+        if stop:
+            payload["stop"] = list(stop)
         if self.runtime_seed is not None:
             payload["seed"] = int(self.runtime_seed)
         if system_prompt:
@@ -180,6 +232,8 @@ class LocalLLMDriver(object):
         try:
             content, reasoning, finish_reason = self._request_chat_once(endpoint, payload)
             if content:
+                if expect_protocol:
+                    content = self._normalize_protocol_text(content)
                 return content
 
             retry_max_tokens = min(max(512, int(max_new_tokens) * 2), 2048)
@@ -188,6 +242,8 @@ class LocalLLMDriver(object):
                 retry_payload["max_tokens"] = int(retry_max_tokens)
                 content2, reasoning2, finish_reason2 = self._request_chat_once(endpoint, retry_payload)
                 if content2:
+                    if expect_protocol:
+                        content2 = self._normalize_protocol_text(content2)
                     return content2
                 if reasoning2:
                     reasoning = reasoning2
@@ -195,6 +251,8 @@ class LocalLLMDriver(object):
 
             fallback = self._reasoning_fallback(reasoning, expect_protocol=expect_protocol)
             if fallback:
+                if expect_protocol:
+                    fallback = self._normalize_protocol_text(fallback)
                 return fallback
 
             self._last_error = "empty content from local backend (finish_reason={})".format(finish_reason or "unknown")

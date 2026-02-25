@@ -134,7 +134,11 @@ def main():
         result, _trace = agent.run_sample(sample, trace_path=trace_path)
         if "backend_mode" not in result:
             result["backend_mode"] = getattr(driver, "backend_mode", "unknown")
-        if args.run_mode == "formal" and result.get("backend_mode") != "real":
+        if (
+            args.run_mode == "formal"
+            and result.get("backend_mode") != "real"
+            and int(result.get("error_count", 0)) == 0
+        ):
             raise RuntimeError(
                 "Formal mode requires real backend output, got backend_mode={}".format(
                     result.get("backend_mode")

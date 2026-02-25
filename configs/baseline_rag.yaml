@@ -16,7 +16,7 @@ model:
 local_backend:
   provider: "ollama"
   base_url: "http://localhost:11434/v1"
-  request_timeout_s: 120
+  request_timeout_s: 300
   use_mock_if_unavailable: true
 
 fallback:

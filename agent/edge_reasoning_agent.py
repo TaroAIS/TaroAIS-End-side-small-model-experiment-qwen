@@ -132,8 +132,8 @@ class EdgeReasoningAgent(object):
         # Remove common chain-of-thought style lead-ins.
         lead_patterns = [
             r"^\s*(wait|maybe|however|well)\b[\s,:-]*",
-            r"^\s*(i think|it seems|let me|i'm not sure|not sure)\b[\s,:-]*",
-            r"^\s*(answer\s*[:：]|final answer\s*[:：])\s*",
+            r"^\s*(i think|it seems|let me|i\'m not sure|not sure)\b[\s,:-]*",
+            r"^\s*(answer|final answer)\s*[:：]\s*",
         ]
         changed = True
         while changed:
@@ -154,7 +154,7 @@ class EdgeReasoningAgent(object):
                 notes.append("trim_tail_marker")
                 break
 
-        # Keep only the first clean sentence when the output is verbose.
+        # Keep only the first clean sentence when the output is too verbose/noisy.
         if len(out) > 0:
             chunks = re.split(r"(?<=[\.\!\?。！？])\s+", out)
             if len(chunks) >= 2 and len(chunks[0]) >= 8:
@@ -168,7 +168,44 @@ class EdgeReasoningAgent(object):
         return out, applied, note
 
     @staticmethod
-    def _compact_answer(text, question, max_chars=96):
+    def _normalize_answer_by_type(text, answer_type):
+        src = str(text or "").strip()
+        at = str(answer_type or "open_text").strip().lower()
+        if not src:
+            return src, False, ""
+
+        out = src
+        note = ""
+        if at == "count":
+            m = re.search(r"\d+", src)
+            if m:
+                out = m.group(0).strip()
+                note = "type_count_number"
+        elif at == "paragraph_id":
+            m = re.search(r"\bparagraph\s*(\d+)\b", src, flags=re.I)
+            if not m:
+                m = re.search(r"第\s*(\d+)\s*段", src)
+            if m:
+                out = "Paragraph {}".format(m.group(1))
+                note = "type_paragraph_id"
+        elif at == "entity_short":
+            parts = re.split(r"(?<=[\.\!\?。！？])\s+", src)
+            if len(parts) >= 2 and len(parts[0].strip()) >= 3:
+                out = parts[0].strip()
+                note = "type_entity_short"
+
+        applied = out != src
+        return out, applied, note
+
+    @staticmethod
+    def _compact_answer(
+        text,
+        question,
+        max_chars=96,
+        use_first_sentence=True,
+        use_regex_span=True,
+        trim_len=True,
+    ):
         src = str(text or "").strip()
         if not src:
             return src, False, ""
@@ -177,34 +214,36 @@ class EdgeReasoningAgent(object):
         notes = []
 
         # Keep the first sentence by default to reduce verbose tails.
-        parts = re.split(r"(?<=[\.\!\?。！？])\s+", out)
-        if len(parts) >= 2 and len(parts[0].strip()) >= 4:
-            out = parts[0].strip()
-            notes.append("first_sentence")
+        if bool(use_first_sentence):
+            parts = re.split(r"(?<=[\.\!\?。！？])\s+", out)
+            if len(parts) >= 2 and len(parts[0].strip()) >= 4:
+                out = parts[0].strip()
+                notes.append("first_sentence")
 
         # Extract concise spans for common QA patterns.
-        span_patterns = []
-        if q.startswith("where"):
-            span_patterns += [r"\b(?:born|located|in)\s+in\s+([^.;,\n]+(?:,\s*[^.;,\n]+)?)"]
-        if q.startswith("who"):
-            span_patterns += [r"\bwas\s+([^.;,\n]+)", r"\bis\s+([^.;,\n]+)"]
-        if "position" in q:
-            span_patterns += [r"\bposition of\s+([^.;,\n]+)"]
-        span_patterns += [r"\bwas born in\s+([^.;,\n]+(?:,\s*[^.;,\n]+)?)"]
+        if bool(use_regex_span):
+            span_patterns = []
+            if q.startswith("where"):
+                span_patterns += [r"\b(?:born|located|in)\s+in\s+([^.;,\n]+(?:,\s*[^.;,\n]+)?)"]
+            if q.startswith("who"):
+                span_patterns += [r"\bwas\s+([^.;,\n]+)", r"\bis\s+([^.;,\n]+)"]
+            if "position" in q:
+                span_patterns += [r"\bposition of\s+([^.;,\n]+)"]
+            span_patterns += [r"\bwas born in\s+([^.;,\n]+(?:,\s*[^.;,\n]+)?)"]
 
-        for pat in span_patterns:
-            m = re.search(pat, src, flags=re.I)
-            if m:
-                candidate = (m.group(1) or "").strip(" .,:;")
-                if candidate:
-                    out = candidate
-                    notes.append("regex_span")
-                    break
+            for pat in span_patterns:
+                m = re.search(pat, src, flags=re.I)
+                if m:
+                    candidate = (m.group(1) or "").strip(" .,:;")
+                    if candidate:
+                        out = candidate
+                        notes.append("regex_span")
+                        break
 
         # Remove markdown emphasis and excess spaces.
         out = re.sub(r"[*_`]+", "", out)
         out = " ".join(out.split()).strip(" ,;")
-        if len(out) > int(max_chars):
+        if bool(trim_len) and len(out) > int(max_chars):
             out = out[: int(max_chars)].rstrip(" ,;")
             notes.append("trim_len")
 
@@ -224,7 +263,7 @@ class EdgeReasoningAgent(object):
         return False, ""
 
     @staticmethod
-    def _is_low_confidence_final(pred, question, cfg):
+    def _is_low_confidence_final(pred, question, cfg, answer_type="open_text"):
         cfg = cfg or {}
         text = str(pred or "").strip()
         if not text:
@@ -253,6 +292,16 @@ class EdgeReasoningAgent(object):
                 break
 
         q = str(question or "").strip()
+        at = str(answer_type or "open_text").strip().lower()
+        if at == "paragraph_id":
+            if re.search(r"\bparagraph\s*\d+\b", text, flags=re.I) is None and re.search(
+                r"第\s*\d+\s*段", text
+            ) is None:
+                reasons.append("paragraph_id_missing")
+        if at == "entity_short" and len(text) > 220:
+            reasons.append("entity_too_long")
+        if at == "count" and re.search(r"\d", text) is None:
+            reasons.append("count_missing_number")
         if q and len(q) > 0:
             if q.lower().startswith("how many") or q.startswith("多少"):
                 if re.search(r"\d", text) is None:
@@ -331,8 +380,21 @@ class EdgeReasoningAgent(object):
         answer_postprocess_enable = bool(answer_postprocess_cfg.get("enable", False))
         answer_postprocess_max_chars = int(answer_postprocess_cfg.get("max_chars", 96))
         single_doc_compact_enable = bool(answer_postprocess_cfg.get("single_doc_compact", False))
+        answer_postprocess_task_modes = answer_postprocess_cfg.get("task_modes", {}) or {}
         entity_compact_cfg = answer_postprocess_cfg.get("entity_compact", {}) or {}
         entity_compact_enable = bool(entity_compact_cfg.get("enable", False))
+        single_doc_refine_policy_cfg = (
+            agent_cfg.get("single_doc_refine", {}).get("policy", {}) or {}
+        )
+        force_retrieve_requires_low_confidence = bool(
+            single_doc_refine_policy_cfg.get("force_retrieve_requires_low_confidence", True)
+        )
+        force_retrieve_requires_low_overlap = bool(
+            single_doc_refine_policy_cfg.get("force_retrieve_requires_low_overlap", True)
+        )
+        force_retrieve_low_overlap_threshold = float(
+            single_doc_refine_policy_cfg.get("force_retrieve_low_overlap_threshold", 0.18)
+        )
         task_overrides = agent_cfg.get("task_overrides", {})
         single_doc_override = {}
         code_override = {}
@@ -486,6 +548,11 @@ class EdgeReasoningAgent(object):
             single_doc_answer_type = self._single_doc_answer_type(
                 question, answer_type_policy_cfg
             )
+            sid_lower = str(sid or "").strip().lower()
+            if "passage_count" in sid_lower:
+                single_doc_answer_type = "count"
+            elif "passage_retrieval" in sid_lower:
+                single_doc_answer_type = "paragraph_id"
             if single_doc_answer_type in fastpath_types:
                 single_doc_fastpath_applied = True
                 effective_max_steps = min(effective_max_steps, fastpath_max_steps)
@@ -614,6 +681,8 @@ class EdgeReasoningAgent(object):
             )
             prompt_tokens_total += _approx_tokens(prompt)
 
+            llm_failed = False
+            llm_error = ""
             if self.controller_fn is not None:
                 with timer.phase("llm"):
                     raw = self.controller_fn(
@@ -624,14 +693,27 @@ class EdgeReasoningAgent(object):
                         sample=sample,
                     )
             else:
-                with timer.phase("llm"):
-                    raw = self.llm.generate(
-                        prompt,
-                        expect_protocol=True,
-                        temperature=protocol_temperature,
-                        top_p=protocol_top_p,
-                        top_k=protocol_top_k,
-                        max_new_tokens=protocol_max_new_tokens,
+                try:
+                    with timer.phase("llm"):
+                        raw = self.llm.generate(
+                            prompt,
+                            expect_protocol=True,
+                            temperature=protocol_temperature,
+                            top_p=protocol_top_p,
+                            top_k=protocol_top_k,
+                            max_new_tokens=protocol_max_new_tokens,
+                        )
+                except Exception as exc:
+                    llm_failed = True
+                    llm_error = str(exc)
+                    error_count += 1
+                    raw = "<final>{}</final>".format(
+                        memory.best_answer_from_chunks(
+                            question,
+                            task=task,
+                            answer_type=single_doc_answer_type,
+                            max_chars=fallback_max_chars,
+                        )
                     )
             completion_tokens_total += _approx_tokens(raw)
             tag, content = parse_protocol_output(raw)
@@ -650,15 +732,21 @@ class EdgeReasoningAgent(object):
                         raw_output=repair_input, question=question, evidence_text=evidence_text
                     )
                     prompt_tokens_total += _approx_tokens(repair_prompt)
-                    with timer.phase("llm"):
-                        repaired_raw = self.llm.generate(
-                            repair_prompt,
-                            expect_protocol=True,
-                            temperature=protocol_temperature,
-                            top_p=protocol_top_p,
-                            top_k=protocol_top_k,
-                            max_new_tokens=protocol_max_new_tokens,
-                        )
+                    try:
+                        with timer.phase("llm"):
+                            repaired_raw = self.llm.generate(
+                                repair_prompt,
+                                expect_protocol=True,
+                                temperature=protocol_temperature,
+                                top_p=protocol_top_p,
+                                top_k=protocol_top_k,
+                                max_new_tokens=protocol_max_new_tokens,
+                            )
+                    except Exception as exc:
+                        error_count += 1
+                        repaired_raw = ""
+                        last_repair_output = "repair_llm_error: {}".format(str(exc))
+                        break
                     completion_tokens_total += _approx_tokens(repaired_raw)
                     repair_attempts += 1
                     last_repair_output = repaired_raw
@@ -687,6 +775,8 @@ class EdgeReasoningAgent(object):
                 "repair_attempts": int(repair_attempts),
                 "last_repair_output": last_repair_output,
                 "format_repair_failed": bool(format_repair_failed),
+                "llm_failed": bool(llm_failed),
+                "llm_error": llm_error,
                 "dropped": dropped,
                 "rewrite_used": False,
                 "rewrite_keyword": "",
@@ -870,6 +960,7 @@ class EdgeReasoningAgent(object):
                     pred_candidate,
                     question,
                     effective_low_conf_cfg,
+                    answer_type=single_doc_answer_type if task == "single_doc_qa" else "open_text",
                 )
             step_info["low_confidence_detected"] = bool(low_confidence_detected)
             step_info["low_confidence_reason"] = low_confidence_reason
@@ -877,6 +968,19 @@ class EdgeReasoningAgent(object):
             step_info["evidence_overlap_score"] = float(last_evidence_overlap_score)
 
             force_retrieve_hit = bool(low_confidence_detected or task_force_on_first_final)
+            if task == "single_doc_qa":
+                low_overlap_hit = bool(
+                    last_evidence_overlap_score < float(force_retrieve_low_overlap_threshold)
+                )
+                base_trigger = bool(low_confidence_detected)
+                if task_force_on_first_final:
+                    base_trigger = True
+                if force_retrieve_requires_low_confidence and (not task_force_on_first_final):
+                    base_trigger = bool(low_confidence_detected)
+                if force_retrieve_requires_low_overlap:
+                    force_retrieve_hit = bool(base_trigger and low_overlap_hit)
+                else:
+                    force_retrieve_hit = bool(base_trigger)
             if task == "single_doc_qa" and single_doc_fastpath_applied:
                 force_retrieve_hit = bool(
                     last_evidence_overlap_score < float(fastpath_overlap_threshold)
@@ -934,13 +1038,29 @@ class EdgeReasoningAgent(object):
 
         postprocess_applied = False
         postprocess_note = ""
+        task_postprocess_mode = str(
+            answer_postprocess_task_modes.get(task, "conservative")
+        ).strip().lower()
         if task == "single_doc_qa":
             pred, postprocess_applied, postprocess_note = self._clean_single_doc_answer(pred)
+            typed_pred, typed_applied, typed_note = self._normalize_answer_by_type(
+                pred, single_doc_answer_type
+            )
+            if typed_applied:
+                pred = typed_pred
+                postprocess_applied = True
+                if postprocess_note:
+                    postprocess_note = "{};{}".format(postprocess_note, typed_note)
+                else:
+                    postprocess_note = typed_note
             if answer_postprocess_enable and single_doc_compact_enable:
                 compact_pred, compact_applied, compact_note = self._compact_answer(
                     pred,
                     question,
                     max_chars=answer_postprocess_max_chars,
+                    use_first_sentence=True,
+                    use_regex_span=True,
+                    trim_len=True,
                 )
                 if compact_applied:
                     pred = compact_pred
@@ -953,11 +1073,18 @@ class EdgeReasoningAgent(object):
             task in ("multi_doc_qa", "code_qa")
             and answer_postprocess_enable
             and entity_compact_enable
+            and task_postprocess_mode not in ("off", "none", "disabled")
         ):
+            use_first_sentence = task_postprocess_mode in ("aggressive", "entity_compact")
+            use_regex_span = task_postprocess_mode in ("aggressive", "entity_compact")
+            trim_len = task_postprocess_mode in ("aggressive", "balanced", "entity_compact")
             compact_pred, compact_applied, compact_note = self._compact_answer(
                 pred,
                 question,
                 max_chars=answer_postprocess_max_chars,
+                use_first_sentence=use_first_sentence,
+                use_regex_span=use_regex_span,
+                trim_len=trim_len,
             )
             if compact_applied:
                 pred = compact_pred
@@ -1008,19 +1135,36 @@ class EdgeReasoningAgent(object):
                 refine_prompt = build_baseline_prompt(question, refine_evidence)
                 refine_triggered = True
                 prompt_tokens_total += _approx_tokens(refine_prompt)
-                with timer.phase("llm"):
-                    refined_pred = self.llm.generate(
-                        refine_prompt,
-                        expect_protocol=False,
-                        temperature=single_doc_refine_temperature,
-                        top_p=answer_top_p,
-                        top_k=answer_top_k,
-                        max_new_tokens=single_doc_refine_max_new_tokens,
-                    )
+                try:
+                    with timer.phase("llm"):
+                        refined_pred = self.llm.generate(
+                            refine_prompt,
+                            expect_protocol=False,
+                            temperature=single_doc_refine_temperature,
+                            top_p=answer_top_p,
+                            top_k=answer_top_k,
+                            max_new_tokens=single_doc_refine_max_new_tokens,
+                        )
+                except Exception as exc:
+                    error_count += 1
+                    refined_pred = ""
+                    reason_parts.append("refine_llm_error")
+                    refine_skip_reason = "refine_llm_error:{}".format(str(exc))
                 completion_tokens_total += _approx_tokens(refined_pred)
                 if (refined_pred or "").strip():
                     pred = refined_pred.strip()
                     pred, refined_post_applied, refined_post_note = self._clean_single_doc_answer(pred)
+                    pred, refined_type_applied, refined_type_note = self._normalize_answer_by_type(
+                        pred, single_doc_answer_type
+                    )
+                    if refined_type_applied:
+                        refined_post_applied = True
+                        if refined_post_note:
+                            refined_post_note = "{};{}".format(
+                                refined_post_note, refined_type_note
+                            )
+                        else:
+                            refined_post_note = refined_type_note
                     if refined_post_applied:
                         postprocess_applied = True
                         if postprocess_note:
@@ -1100,3 +1244,4 @@ class EdgeReasoningAgent(object):
             path.write_text(json.dumps(trace, ensure_ascii=False, indent=2), encoding="utf-8")
 
         return result, trace
+
