@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import json
 import sys
 from collections import defaultdict
@@ -71,7 +72,7 @@ def _narrativeqa_rows(split, max_rows=0, use_full_text=True):
             full_text_map[doc_id] = zip_file.read(name).decode("utf-8", errors="ignore")
 
     rows = []
-    for raw in source_rows:
+    for row_idx, raw in enumerate(source_rows):
         document = ensure_python(raw.get("document", {}))
         question = ensure_python(raw.get("question", {}))
         answers = ensure_python(raw.get("answers", []))
@@ -82,14 +83,16 @@ def _narrativeqa_rows(split, max_rows=0, use_full_text=True):
             if text:
                 answer = text
                 break
+        question_text = safe_text(question.get("text", ""))
+        q_hash = hashlib.sha1(question_text.encode("utf-8")).hexdigest()[:16]
         full_text = safe_text(full_text_map.get(doc_id, ""))
         if not full_text:
             full_text = safe_text((document.get("summary") or {}).get("text", ""))
         rows.append(
             dataset_row(
-                sample_id="nqa_{}_{}".format(split, doc_id or len(rows)),
+                sample_id="nqa_{}_{}_{}_{}".format(split, doc_id or "doc", q_hash, row_idx),
                 task="single_doc_qa",
-                question=safe_text(question.get("text", "")),
+                question=question_text,
                 documents=[
                     {
                         "doc_id": doc_id or "d1",

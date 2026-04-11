@@ -2,6 +2,7 @@
 import io
 import json
 import math
+import os
 import random
 import re
 import time
@@ -10,6 +11,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import requests
+import urllib3
 
 from utils.io import dump_jsonl, ensure_dir, write_json
 
@@ -79,6 +81,13 @@ EXT_DATASET_SPECS = {
         "language": "java",
     },
 }
+
+HF_WEB_BASE = os.environ.get("HF_WEB_BASE", "https://huggingface.co").rstrip("/")
+HF_API_BASE = os.environ.get("HF_API_BASE", HF_WEB_BASE).rstrip("/")
+HF_DATASETS_SERVER_BASE = os.environ.get(
+    "HF_DATASETS_SERVER_BASE",
+    "https://datasets-server.huggingface.co",
+).rstrip("/")
 
 
 def safe_text(value):
@@ -180,17 +189,30 @@ def dataset_row(sample_id, task, question, documents, answer, meta):
 
 
 def hf_api_payload(dataset_id):
-    url = "https://huggingface.co/api/datasets/{}".format(dataset_id)
+    url = "{}/api/datasets/{}".format(HF_API_BASE, dataset_id)
     resp = request_with_retry(url, timeout=60)
     resp.raise_for_status()
     return resp.json()
 
 
 def request_with_retry(url, timeout=60, max_attempts=3):
+    session = requests.Session()
+    session.trust_env = False
     last_exc = None
     for attempt in range(1, int(max_attempts) + 1):
         try:
-            resp = requests.get(url, timeout=timeout)
+            resp = session.get(url, timeout=timeout)
+            resp.raise_for_status()
+            return resp
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= int(max_attempts):
+                break
+            time.sleep(float(attempt))
+    for attempt in range(1, int(max_attempts) + 1):
+        try:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            resp = session.get(url, timeout=timeout, verify=False)
             resp.raise_for_status()
             return resp
         except Exception as exc:
@@ -202,7 +224,7 @@ def request_with_retry(url, timeout=60, max_attempts=3):
 
 
 def hf_resolve_url(dataset_id, rel_path, revision="main"):
-    return "https://huggingface.co/datasets/{}/resolve/{}/{}".format(dataset_id, revision, rel_path)
+    return "{}/datasets/{}/resolve/{}/{}".format(HF_WEB_BASE, dataset_id, revision, rel_path)
 
 
 def hf_siblings(dataset_id):
@@ -232,7 +254,8 @@ def load_parquet_rows(urls, max_rows=0):
     rows = []
     remaining = int(max_rows) if max_rows else 0
     for url in urls:
-        frame = pd.read_parquet(url)
+        resp = request_with_retry(url, timeout=300)
+        frame = pd.read_parquet(io.BytesIO(resp.content))
         for row in frame.to_dict(orient="records"):
             rows.append(ensure_python(row))
             if remaining:
@@ -252,8 +275,8 @@ def rows_api_iter(dataset_id, config, split, max_rows=0, page_size=100):
             if length <= 0:
                 break
         url = (
-            "https://datasets-server.huggingface.co/rows?dataset={}&config={}&split={}&offset={}&length={}"
-        ).format(dataset_id, config, split, offset, length)
+            "{}/rows?dataset={}&config={}&split={}&offset={}&length={}"
+        ).format(HF_DATASETS_SERVER_BASE, dataset_id, config, split, offset, length)
         resp = request_with_retry(url, timeout=120)
         payload = resp.json()
         rows = payload.get("rows", [])

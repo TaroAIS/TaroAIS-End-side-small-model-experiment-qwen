@@ -4,16 +4,77 @@
   },
   "main_eval": {
     "canonical": "data/main_eval/longbench_3tasks_test.jsonl",
-    "dev": "data/main_eval/longbench_3tasks_dev100.jsonl",
-    "holdout": "data/main_eval/longbench_3tasks_holdout100.jsonl"
+    "source_meta": "data/manifests/longbench_3tasks_source.json",
+    "dataset_id": "zai-org/LongBench",
+    "selected_tasks": {
+      "single_doc_qa": [
+        "narrativeqa",
+        "qasper",
+        "multifieldqa_en",
+        "multifieldqa_zh"
+      ],
+      "multi_doc_qa": [
+        "hotpotqa",
+        "2wikimqa",
+        "musique",
+        "dureader"
+      ],
+      "code_qa": [
+        "lcc",
+        "repobench-p"
+      ]
+    }
   },
   "train_ext": {
-    "combined_train": "data/train_ext/combined_train.jsonl",
-    "combined_valid": "data/train_ext/combined_valid.jsonl",
     "groups": {
-      "single_doc": {},
-      "multi_doc": {},
-      "code_qa": {}
+      "single_doc": {
+        "narrativeqa": {
+          "train": "data/train_ext/single_doc/narrativeqa_train.jsonl",
+          "valid": "data/train_ext/single_doc/narrativeqa_valid.jsonl",
+          "dataset_id": "deepmind/narrativeqa"
+        },
+        "qasper": {
+          "train": "data/train_ext/single_doc/qasper_train.jsonl",
+          "valid": "data/train_ext/single_doc/qasper_valid.jsonl",
+          "dataset_id": "allenai/qasper"
+        },
+        "merged": {
+          "train": "data/train_ext/single_doc/merged_train.jsonl",
+          "valid": "data/train_ext/single_doc/merged_valid.jsonl"
+        }
+      },
+      "multi_doc": {
+        "hotpotqa": {
+          "train": "data/train_ext/multi_doc/hotpotqa_train.jsonl",
+          "valid": "data/train_ext/multi_doc/hotpotqa_valid.jsonl",
+          "dataset_id": "hotpotqa/hotpot_qa"
+        },
+        "musique": {
+          "train": "data/train_ext/multi_doc/musique_train.jsonl",
+          "valid": "data/train_ext/multi_doc/musique_valid.jsonl",
+          "dataset_id": "dgslibisey/MuSiQue"
+        },
+        "merged": {
+          "train": "data/train_ext/multi_doc/merged_train.jsonl",
+          "valid": "data/train_ext/multi_doc/merged_valid.jsonl"
+        }
+      },
+      "code_qa": {
+        "repobench_python": {
+          "train": "data/train_ext/code_qa/repobench_python_train.jsonl",
+          "valid": "data/train_ext/code_qa/repobench_python_valid.jsonl",
+          "dataset_id": "tianyang/repobench_python_v1.1"
+        },
+        "repobench_java": {
+          "train": "data/train_ext/code_qa/repobench_java_train.jsonl",
+          "valid": "data/train_ext/code_qa/repobench_java_valid.jsonl",
+          "dataset_id": "tianyang/repobench_java_v1.1"
+        },
+        "merged": {
+          "train": "data/train_ext/code_qa/merged_train.jsonl",
+          "valid": "data/train_ext/code_qa/merged_valid.jsonl"
+        }
+      }
     }
   }
 }

@@ -1,0 +1,46 @@
+{
+  "mode": "remote",
+  "source": "huggingface:zai-org/LongBench",
+  "revision_requested": "main",
+  "revision_resolved": "5e628be450b7e67fb7ae6e201bd6d8f7056f7672",
+  "upstream_last_modified": "2024-12-18T08:44:33.000Z",
+  "selected_tasks": {
+    "single_doc_qa": [
+      "narrativeqa",
+      "qasper",
+      "multifieldqa_en",
+      "multifieldqa_zh"
+    ],
+    "multi_doc_qa": [
+      "hotpotqa",
+      "2wikimqa",
+      "musique",
+      "dureader"
+    ],
+    "code_qa": [
+      "lcc",
+      "repobench-p"
+    ]
+  },
+  "selected_files": [
+    "data/narrativeqa.jsonl",
+    "data/qasper.jsonl",
+    "data/multifieldqa_en.jsonl",
+    "data/multifieldqa_zh.jsonl",
+    "data/hotpotqa.jsonl",
+    "data/2wikimqa.jsonl",
+    "data/musique.jsonl",
+    "data/dureader.jsonl",
+    "data/lcc.jsonl",
+    "data/repobench-p.jsonl"
+  ],
+  "n_total": 2550,
+  "task_counts": {
+    "single_doc_qa": 750,
+    "multi_doc_qa": 800,
+    "code_qa": 1000
+  },
+  "seed": 42,
+  "max_samples_per_task": 0,
+  "output": "data/main_eval/longbench_3tasks_test.jsonl"
+}

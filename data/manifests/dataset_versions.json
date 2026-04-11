@@ -1,15 +1,66 @@
 {
-  "status": "pending_local_generation",
-  "generated_by": [
-    "scripts/prepare_longbench_3tasks.py",
-    "scripts/prepare_task_ext_corpus.py",
-    "scripts/build_combined_ext_sets.py",
-    "scripts/build_main_eval_sets_v2.py"
-  ],
+  "status": "main_eval_generated_train_ext_pending_network",
+  "generated_by": "scripts/prepare_task_ext_corpus.py",
   "seed": 42,
-  "datasets": {},
+  "datasets": {
+    "narrativeqa": {
+      "dataset_id": "deepmind/narrativeqa",
+      "revision_resolved": "2e643e7363944af1c33a652d1c87320d0871c4e4",
+      "upstream_last_modified": "2024-03-06T07:33:05.000Z",
+      "n_train": 32747,
+      "n_valid": 3461
+    },
+    "qasper": {
+      "dataset_id": "allenai/qasper",
+      "revision_resolved": "fdc9d8214fbab5dd782958601db4d678e6934a54",
+      "upstream_last_modified": "2022-10-07T22:04:11.000Z",
+      "n_train": 2322,
+      "n_valid": 945
+    },
+    "hotpotqa": {
+      "dataset_id": "hotpotqa/hotpot_qa",
+      "revision_resolved": "1908d6afbbead072334abe2965f91bd2709910ab",
+      "upstream_last_modified": "2025-08-11T10:16:27.000Z",
+      "n_train": 90447,
+      "n_valid": 7405
+    },
+    "musique": {
+      "dataset_id": "dgslibisey/MuSiQue",
+      "revision_resolved": "c8f4f8c9465fb69d31a8eae894c3fd509c4ca321",
+      "upstream_last_modified": "2023-06-16T20:00:07.000Z",
+      "n_train": 19938,
+      "n_valid": 2417
+    },
+    "repobench_python": {
+      "dataset_id": "tianyang/repobench_python_v1.1",
+      "revision_resolved": "8a7cf0c8942cc1aa066bf261839650ac55a2ff79",
+      "upstream_last_modified": "2024-02-27T11:21:31.000Z",
+      "n_train": 21206,
+      "n_valid": 2355
+    },
+    "repobench_java": {
+      "dataset_id": "tianyang/repobench_java_v1.1",
+      "revision_resolved": "0c2b0db49ea372525f5db37b6b6ef438aa20f35d",
+      "upstream_last_modified": "2024-02-27T11:31:22.000Z",
+      "n_train": 23511,
+      "n_valid": 2612
+    }
+  },
   "notes": [
     "This repository tracks dataset source definitions and generation entrypoints.",
-    "Large JSONL datasets are generated locally and are intentionally excluded from git."
-  ]
+    "Large JSONL datasets are generated locally and are intentionally excluded from git.",
+    "LongBench_3tasks main_eval has been generated locally on this machine.",
+    "train_ext regeneration is currently pending because the local environment cannot reach Hugging Face endpoints reliably."
+  ],
+  "main_eval": {
+    "dataset_id": "zai-org/LongBench",
+    "revision_resolved": "5e628be450b7e67fb7ae6e201bd6d8f7056f7672",
+    "upstream_last_modified": "2024-12-18T08:44:33.000Z",
+    "n_total": 2550,
+    "task_counts": {
+      "single_doc_qa": 750,
+      "multi_doc_qa": 800,
+      "code_qa": 1000
+    }
+  }
 }
