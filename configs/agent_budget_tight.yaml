@@ -1,6 +1,6 @@
-# Edge-Reasoning Agent ablation: iterative_off
+# Edge-Reasoning Agent ablation: budget_tight
 experiment:
-  profile: r23_lock_iterative_off
+  profile: r23_lock_budget_tight
   objective: canonical_three_task_balance
 model:
   backend: local
@@ -14,7 +14,7 @@ model:
     temperature: 0.35
     top_p: 0.9
     top_k: 40
-    max_new_tokens: 272
+    max_new_tokens: 224
 local_backend:
   provider: ollama
   base_url: http://localhost:11434/v1
@@ -32,62 +32,72 @@ retrieval:
     enable: true
     alpha_dense: 0.65
     alpha_lexical: 0.35
-    max_candidates: 12
+    max_candidates: 10
     dedup_by_chunk_id: true
   chunk_size: 512
   chunk_overlap: 128
-  top_k_init: 3
-  top_k_iter: 0
+  top_k_init: 1
+  top_k_iter: 1
 agent:
-  max_steps: 1
+  max_steps: 3
   max_prompt_tokens: 8000
   memory_strategy: fact_memory
-  facts_per_step: 6
+  facts_per_step: 5
   early_stop:
-    enable: false
-    max_same_keyword_hits: 99
-    max_no_new_chunk_steps: 99
-    enable_single_doc_shortcut: false
-    single_doc_max_steps: 1
+    enable: true
+    max_same_keyword_hits: 2
+    max_no_new_chunk_steps: 1
+    enable_single_doc_shortcut: true
+    single_doc_max_steps: 2
     enable_query_rewrite_retry: false
   format_repair:
     enable: true
-    max_retries: 2
+    max_retries: 1
   protocol_decoding:
     temperature: 0.0
     top_p: 1.0
     top_k: 1
-    max_new_tokens: 96
+    max_new_tokens: 72
   answer_postprocess:
     enable: true
-    max_chars: 120
-    single_doc_compact: false
+    max_chars: 96
+    single_doc_compact: true
     task_modes:
       single_doc_qa: aggressive
       multi_doc_qa: conservative
       code_qa: conservative
     entity_compact:
       enable: true
+  decoding_budget:
+    enable: true
+    short_question_token_threshold: 10
+    short_question_max_new_tokens: 128
+    default_max_new_tokens: 168
+    task_caps:
+      code_qa: 180
+      multi_doc_qa: 192
+      single_doc_qa: 160
   task_overrides:
     code_qa:
-      top_k_init: 3
-      top_k_iter: 0
-      max_steps: 1
-      max_new_tokens: 220
+      top_k_init: 2
+      top_k_iter: 1
+      max_steps: 3
+      max_new_tokens: 180
       temperature: 0.2
     multi_doc_qa:
-      top_k_init: 3
-      top_k_iter: 0
-      max_steps: 1
-      max_new_tokens: 240
-      temperature: 0.25
+      top_k_init: 2
+      top_k_iter: 1
+      max_steps: 3
+      max_new_tokens: 192
+      temperature: 0.2
     single_doc_qa:
-      top_k_init: 4
-      max_steps: 1
-      enable_final_refine: false
-      always_refine: false
+      top_k_init: 3
+      max_steps: 2
+      enable_final_refine: true
+      final_refine_max_new_tokens: 96
+      final_refine_temperature: 0.2
   uncertainty_trigger:
-    enable: false
+    enable: true
     patterns:
     - not sure
     - need to verify

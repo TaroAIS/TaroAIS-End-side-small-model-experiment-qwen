@@ -1,0 +1,15 @@
+{
+  "status": "pending_local_generation",
+  "generated_by": [
+    "scripts/prepare_longbench_3tasks.py",
+    "scripts/prepare_task_ext_corpus.py",
+    "scripts/build_combined_ext_sets.py",
+    "scripts/build_main_eval_sets_v2.py"
+  ],
+  "seed": 42,
+  "datasets": {},
+  "notes": [
+    "This repository tracks dataset source definitions and generation entrypoints.",
+    "Large JSONL datasets are generated locally and are intentionally excluded from git."
+  ]
+}

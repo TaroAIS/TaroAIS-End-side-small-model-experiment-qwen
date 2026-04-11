@@ -1,0 +1,19 @@
+{
+  "smoke": {
+    "canonical": "smoke_data/minilongbench_tiny.jsonl"
+  },
+  "main_eval": {
+    "canonical": "data/main_eval/longbench_3tasks_test.jsonl",
+    "dev": "data/main_eval/longbench_3tasks_dev100.jsonl",
+    "holdout": "data/main_eval/longbench_3tasks_holdout100.jsonl"
+  },
+  "train_ext": {
+    "combined_train": "data/train_ext/combined_train.jsonl",
+    "combined_valid": "data/train_ext/combined_valid.jsonl",
+    "groups": {
+      "single_doc": {},
+      "multi_doc": {},
+      "code_qa": {}
+    }
+  }
+}

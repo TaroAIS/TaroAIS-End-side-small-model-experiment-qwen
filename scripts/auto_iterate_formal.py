@@ -408,11 +408,9 @@ def _restore_last_good_config(config_path, save_path):
 def _ensure_extended_sets(py, args):
     dev_path = ROOT / args.dev_dataset
     holdout_path = ROOT / args.holdout_dataset
-    ext_path = ROOT / args.ext_dataset
     if (
         dev_path.exists()
         and holdout_path.exists()
-        and ext_path.exists()
         and not bool(args.force_rebuild_ext_eval)
     ):
         return ["extended eval datasets already exist"]
@@ -420,27 +418,25 @@ def _ensure_extended_sets(py, args):
     cmd = [
         py,
         args.ext_builder_script,
-        "--train",
-        args.train_dataset,
         "--valid",
         args.valid_dataset,
         "--canonical",
         args.canonical_dataset,
-        "--out_ext",
-        args.ext_dataset,
         "--out_dev",
         args.dev_dataset,
         "--out_holdout",
         args.holdout_dataset,
         "--manifest",
         args.ext_manifest,
-        "--target_total",
-        str(int(args.ext_target_total)),
+        "--dev_size",
+        str(int(args.dev_size)),
+        "--holdout_size",
+        str(int(args.holdout_size)),
         "--seed",
         str(int(args.ext_seed)),
     ]
     _run(cmd)
-    return ["build extended eval datasets ({})".format(args.ext_dataset)]
+    return ["build extended eval datasets ({}, {})".format(args.dev_dataset, args.holdout_dataset)]
 
 
 def _ensure_baseline_anchor(
@@ -1359,16 +1355,18 @@ def main():
     parser.add_argument("--python", default=str(ROOT / ".venv" / "Scripts" / "python.exe"))
     parser.add_argument("--config", default="configs/agent.yaml")
     parser.add_argument("--baseline_config", default="configs/baseline_rag.yaml")
-    parser.add_argument("--canonical_dataset", default="data/minilongbench_test.jsonl")
-    parser.add_argument("--dev_dataset", default="data/minilongbench_eval_dev100.jsonl")
-    parser.add_argument("--holdout_dataset", default="data/minilongbench_eval_holdout100.jsonl")
-    parser.add_argument("--train_dataset", default="data/minilongbench_train.jsonl")
-    parser.add_argument("--valid_dataset", default="data/minilongbench_valid.jsonl")
-    parser.add_argument("--ext_builder_script", default="scripts/build_extended_eval_sets.py")
-    parser.add_argument("--ext_dataset", default="data/minilongbench_eval_ext200.jsonl")
-    parser.add_argument("--ext_manifest", default="data/minilongbench_eval_ext200_manifest.json")
+    parser.add_argument("--canonical_dataset", default="data/main_eval/longbench_3tasks_test.jsonl")
+    parser.add_argument("--dev_dataset", default="data/main_eval/longbench_3tasks_dev100.jsonl")
+    parser.add_argument("--holdout_dataset", default="data/main_eval/longbench_3tasks_holdout100.jsonl")
+    parser.add_argument("--train_dataset", default="data/train_ext/combined_train.jsonl")
+    parser.add_argument("--valid_dataset", default="data/train_ext/combined_valid.jsonl")
+    parser.add_argument("--ext_builder_script", default="scripts/build_main_eval_sets_v2.py")
+    parser.add_argument("--ext_dataset", default="data/train_ext/combined_valid.jsonl")
+    parser.add_argument("--ext_manifest", default="data/manifests/main_eval_split_manifest.json")
     parser.add_argument("--ext_target_total", type=int, default=200)
     parser.add_argument("--ext_seed", type=int, default=20260219)
+    parser.add_argument("--dev_size", type=int, default=100)
+    parser.add_argument("--holdout_size", type=int, default=100)
     parser.add_argument("--force_rebuild_ext_eval", action="store_true")
     parser.add_argument("--canonical_baseline_anchor", default="results/baseline_rag_formal_anchor_20260217_154511.jsonl")
     parser.add_argument("--dev_baseline_anchor", default="results/baseline_rag_formal_dev100_anchor_20260219.jsonl")
@@ -1386,6 +1384,7 @@ def main():
     parser.add_argument("--dev_every_rounds", type=int, default=2)
     parser.add_argument("--holdout_every_rounds", type=int, default=3)
     parser.add_argument("--no_improve_to_train", type=int, default=3)
+    parser.add_argument("--enable_training_branch", action="store_true")
     parser.add_argument("--min_score_delta", type=float, default=0.002)
     parser.add_argument("--regression_drop_threshold", type=float, default=0.03)
     parser.add_argument("--run_holdout_multiseed", action="store_true")
@@ -1728,7 +1727,7 @@ def main():
                 canonical_multi_pass_streak = 0
 
         training_result = None
-        if no_improve_streak >= int(args.no_improve_to_train):
+        if bool(args.enable_training_branch) and no_improve_streak >= int(args.no_improve_to_train):
             training_result = _run_training_branch(py, round_idx)
             no_improve_streak = 0
 

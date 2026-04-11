@@ -16,10 +16,18 @@ import pandas  # noqa
 
 ROOT = Path.cwd()
 
-# Check remote dataset availability.
-hf_api = "https://huggingface.co/api/datasets/linggm/MiniLongBench"
-resp = requests.get(hf_api, timeout=20)
-resp.raise_for_status()
+# Check remote dataset availability for the upgraded data stack.
+dataset_urls = [
+    "https://huggingface.co/api/datasets/zai-org/LongBench",
+    "https://huggingface.co/api/datasets/deepmind/narrativeqa",
+    "https://huggingface.co/api/datasets/allenai/qasper",
+    "https://huggingface.co/api/datasets/hotpotqa/hotpot_qa",
+    "https://huggingface.co/api/datasets/dgslibisey/MuSiQue",
+    "https://huggingface.co/api/datasets/tianyang/repobench_python_v1.1",
+]
+for hf_api in dataset_urls:
+    resp = requests.get(hf_api, timeout=20)
+    resp.raise_for_status()
 
 cfg_paths = [ROOT / "configs" / "baseline_rag.yaml", ROOT / "configs" / "agent.yaml"]
 for cfg_path in cfg_paths:

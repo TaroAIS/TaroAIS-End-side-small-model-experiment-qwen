@@ -414,7 +414,19 @@ def main():
                 )
             )
 
-        if any(k in method for k in ["think_off", "iterative_off", "memory_sliding", "inj_defense_off"]):
+        if any(
+            k in method
+            for k in [
+                "iterative_off",
+                "memory_sliding",
+                "refine_gate_relaxed",
+                "budget_tight",
+                "forced_retrieve_off",
+                "early_stop_off",
+                "think_off",
+                "inj_defense_off",
+            ]
+        ):
             ablation_rows.append(
                 {
                     "variant": method,

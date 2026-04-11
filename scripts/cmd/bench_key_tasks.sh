@@ -5,7 +5,7 @@ source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
 RUN_MODE="${RUN_MODE:-formal}"
 RETRIEVAL_SCOPE="${RETRIEVAL_SCOPE:-sample}"
 SEEDS="${SEEDS:-42 123 2026}"
-OUT_ROOT="${OUT_ROOT:-report_key}"
+OUT_ROOT="${OUT_ROOT:-report_key_supp}"
 INDEX_DIR="${INDEX_DIR:-data/index}"
 BASELINE_CONFIG="${BASELINE_CONFIG:-configs/baseline_rag.yaml}"
 AGENT_CONFIG="${AGENT_CONFIG:-configs/agent.yaml}"
@@ -13,7 +13,7 @@ AGENT_CONFIG="${AGENT_CONFIG:-configs/agent.yaml}"
 if [[ "$RUN_MODE" == "smoke" ]]; then
   DATASET="${DATASET:-smoke_data/minilongbench_tiny.jsonl}"
 else
-  DATASET="${DATASET:-data/minilongbench_test.jsonl}"
+  DATASET="${DATASET:-data/main_eval/longbench_3tasks_test.jsonl}"
 fi
 
 if [[ "${1:-}" == "--help" ]]; then
@@ -37,7 +37,7 @@ mkdir -p "$OUT_ROOT"
 
 if [[ "$RUN_MODE" == "formal" ]]; then
   bash scripts/cmd/preflight_formal.sh
-  if [[ ! -f data/minilongbench_test.jsonl ]]; then
+  if [[ ! -f data/main_eval/longbench_3tasks_test.jsonl ]]; then
     bash scripts/cmd/prepare_remote_strict.sh
   fi
   if [[ "$RETRIEVAL_SCOPE" == "global" && ! -f "${INDEX_DIR}/index_meta.json" ]]; then
@@ -103,4 +103,4 @@ done
   --max_latency_ratio 1.5 \
   --max_retrieval_ratio 1.8
 
-echo "key-task benchmark done -> ${OUT_ROOT}"
+echo "supplementary key-task benchmark done -> ${OUT_ROOT}"

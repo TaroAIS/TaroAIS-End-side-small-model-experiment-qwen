@@ -129,17 +129,17 @@ def _manifest_counts(rows):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Build extended MiniLongBench eval sets (ext/dev/holdout) with stratified sampling."
+        description="Build extended evaluation sets with stratified sampling."
     )
-    parser.add_argument("--train", default="data/minilongbench_train.jsonl")
-    parser.add_argument("--valid", default="data/minilongbench_valid.jsonl")
-    parser.add_argument("--canonical", default="data/minilongbench_test.jsonl")
-    parser.add_argument("--out_ext", default="data/minilongbench_eval_ext200.jsonl")
-    parser.add_argument("--out_dev", default="data/minilongbench_eval_dev100.jsonl")
-    parser.add_argument("--out_holdout", default="data/minilongbench_eval_holdout100.jsonl")
+    parser.add_argument("--train", default="data/train_ext/combined_train.jsonl")
+    parser.add_argument("--valid", default="data/train_ext/combined_valid.jsonl")
+    parser.add_argument("--canonical", default="data/main_eval/longbench_3tasks_test.jsonl")
+    parser.add_argument("--out_ext", default="data/train_ext/combined_valid.jsonl")
+    parser.add_argument("--out_dev", default="data/main_eval/longbench_3tasks_dev100.jsonl")
+    parser.add_argument("--out_holdout", default="data/main_eval/longbench_3tasks_holdout100.jsonl")
     parser.add_argument(
         "--manifest",
-        default="data/minilongbench_eval_ext200_manifest.json",
+        default="data/manifests/main_eval_split_manifest_legacy.json",
     )
     parser.add_argument("--target_total", type=int, default=200)
     parser.add_argument("--seed", type=int, default=20260219)

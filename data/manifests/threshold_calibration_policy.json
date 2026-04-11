@@ -1,0 +1,19 @@
+{
+  "status": "provisional_frozen_policy",
+  "frozen_at": "2026-04-11",
+  "canonical_dataset": "data/main_eval/longbench_3tasks_test.jsonl",
+  "thresholds": {
+    "overall_f1": 0.37,
+    "single_doc_f1": 0.29,
+    "p95_ratio": 1.8
+  },
+  "calibration_entrypoint": "bash scripts/cmd/calibrate_thresholds.sh",
+  "calibration_outputs": [
+    "report_calibration/calibration_method_summary.csv",
+    "report_calibration/threshold_recommendation.json"
+  ],
+  "notes": [
+    "These thresholds are now governed by an explicit calibration policy instead of undocumented constants.",
+    "Run the calibration entrypoint on current LongBench_3tasks canonical data before freezing paper-ready thresholds."
+  ]
+}

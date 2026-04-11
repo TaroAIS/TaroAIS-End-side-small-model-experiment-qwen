@@ -4,23 +4,27 @@
 - 完成了 `qwen3_small_reasoning_thesis_pack_v4` 的实验工程化落地：
   - 数据准备：`prepare -> index`
   - 主实验：`baseline -> agent -> evaluate`
-  - 消融：`think_off / iterative_off / memory_sliding / inj_defense_off`
-  - Student 路线：`distill -> train_student -> eval_student`
+  - 消融：按 `质量 / 成本 / 稳定性` 三组执行
+  - Student 路线：`distill -> train_student -> eval_student`（独立分支）
 - 所有主流程已提供 CLI，并由 Makefile 统一编排。
 
 ## 2) 数据集更新
 - Smoke 数据：`smoke_data/minilongbench_tiny.jsonl`（3 条）
-- 正式数据接入：`scripts/prepare_minilongbench.py` 支持远程下载 MiniLongBench（HF: `linggm/MiniLongBench`）并转换到本项目 schema。
-- 版本固定：默认 revision `0ba7bf46265f1f783653693fb6b581f617f37275`。
-- 数据追溯文件：`data/minilongbench_source.json`。
+- 主评测数据接入：`scripts/prepare_longbench_3tasks.py` 支持远程下载 `zai-org/LongBench` 并生成 `LongBench_3tasks` canonical 集。
+- 扩展训练池接入：`scripts/prepare_task_ext_corpus.py` 支持构建 `NarrativeQA/Qasper/HotpotQA/MuSiQue/RepoBench` 训练与验证集。
+- 数据追溯文件：
+  - `data/manifests/longbench_3tasks_source.json`
+  - `data/manifests/dataset_registry.json`
+  - `data/manifests/dataset_versions.json`
 
 ## 3) 本次已落地的数据状态
-- 当前正式数据切分（remote strict）:
-  - `data/minilongbench_train.jsonl`: 183
-  - `data/minilongbench_valid.jsonl`: 28
-  - `data/minilongbench_test.jsonl`: 26
-  - 合计：237
-- 三个 split 均通过 `schemas/dataset.schema.json` 校验。
+- 当前正式默认口径：
+  - canonical：`data/main_eval/longbench_3tasks_test.jsonl`
+  - dev：`data/main_eval/longbench_3tasks_dev100.jsonl`
+  - holdout：`data/main_eval/longbench_3tasks_holdout100.jsonl`
+  - train：`data/train_ext/combined_train.jsonl`
+  - valid：`data/train_ext/combined_valid.jsonl`
+- 所有新数据输出均要求通过 `schemas/dataset.schema.json` 校验。
 
 ## 4) 流程与产物
 - Smoke 链路：`scripts/run_smoke.sh`
@@ -62,8 +66,11 @@
   - `global` 保留为扩展实验
 - 新增 `scripts/cmd/preflight_formal.sh`：
   - 检查 HF 数据可达、真实后端可达、`matplotlib/pandas` 可用
-- `scripts/cmd/all.sh` 调整为 formal 严格链路：
-  - `preflight -> prepare_remote_strict -> index -> baseline -> agent -> eval -> ablations -> distill -> train_student -> eval_student`
+- `scripts/cmd/main_formal.sh` 作为 formal 主链：
+  - `preflight -> prepare_remote_strict -> index -> baseline -> compare_controls -> agent -> eval -> ablations`
+- `scripts/cmd/student_branch.sh` 作为独立 student 分支：
+  - `distill -> train_student -> eval_student`
+- `scripts/cmd/all.sh` 保留为兼容入口，等价于 `main_formal.sh`
 
 ## 8) 指标与元数据增强
 - `result` 新增可选字段：
@@ -90,12 +97,12 @@
   - `key_task_summary.csv`（关键任务聚合）
 - 新增 `scripts/cmd/bench_key_tasks.sh`：
   - 默认 seeds：`42 123 2026`
-  - 每个 seed 输出到 `report_key/seed_<seed>/`
+  - 每个 seed 输出到 `report_key_supp/seed_<seed>/`
   - 自动汇总 `95%CI` 与门槛判定
 - 新增 `scripts/aggregate_seed_runs.py`：
   - 输出：
-    - `report_key/seed_aggregate.csv`（mean/std/95%CI）
-    - `report_key/decision_gate.json`（pass/fail + reasons）
+    - `report_key_supp/seed_aggregate.csv`（mean/std/95%CI）
+    - `report_key_supp/decision_gate.json`（pass/fail + reasons）
 - 门槛默认值（中等严格）：
   - `delta_f1_key >= 0.03`
   - `latency_ratio <= 1.5`
@@ -126,11 +133,11 @@
 - 主结论最低约束：
   - `run_mode=formal`
   - `retrieval_scope=sample`
-  - `key_tasks=multi_doc_qa,code_qa`
-  - 报告包含 `95%CI` 与门槛判定文件。
+  - `canonical` 三任务门槛 + `3-seed/CI`
+  - 关键任务 benchmark 仅作补充证据。
 
 ## 13) 关键任务门槛判定解释样例（decision_gate.json）
-- 文件：`report_key/decision_gate.json`
+- 文件：`report_key_supp/decision_gate.json`
 - 关键字段语义：
   - `pass`：是否通过最终门槛
   - `thresholds`：门槛定义

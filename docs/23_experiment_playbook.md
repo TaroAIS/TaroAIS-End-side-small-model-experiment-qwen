@@ -7,10 +7,11 @@
 - code_qa：验证代码语义检索与精确回答能力。
 
 ## 2. 主实验定义（Main Track）
-- 数据：`data/minilongbench_test.jsonl`
-- 对照：`baseline_rag` vs `edge_agent`
+- 数据：`data/main_eval/longbench_3tasks_test.jsonl`
+- 对照：`baseline_rag` / `baseline_budget_matched` / `baseline_single_round_strong` / `edge_agent`
 - 运行：formal + sample
 - 统计：单 seed 迭代，周期性 3-seed（42/123/2026）复核
+- 主胜负口径：canonical 三任务门槛 + 3-seed + CI
 
 ## 3. 验收门槛
 - 单 seed（canonical）：
@@ -26,24 +27,38 @@
 - 显著性：三任务 seed-level `delta_F1` 至少 2/3 的 95%CI 下界 > 0。
 
 ## 4. 扩展实验（Extended Track）
-- 数据：`dev100` 与 `holdout100`
-- 作用：泛化监测与风险预警，不反向主导主实验调参。
+- 数据：`data/main_eval/longbench_3tasks_dev100.jsonl` 与 `data/main_eval/longbench_3tasks_holdout100.jsonl`
+- 作用：跨来源风险预警，不反向主导主实验调参。
+- 命名语义：
+  - `monitor_dev_cross_source`
+  - `monitor_holdout_cross_source`
 
 ## 5. 消融实验（Ablation Track）
-固定必做三项：
-- `iterative_off`
-- `fastpath_off`
-- `refine_gate_relaxed`
+固定分三组：
+- 质量：`iterative_off` / `memory_sliding` / `refine_gate_relaxed`
+- 成本：`budget_tight`
+- 稳定性：`forced_retrieve_off` / `early_stop_off`
 
-目的：验证 single_doc 回归是机制组合问题，而非随机波动。
+目的：围绕质量、尾延迟和跨 seed 稳定性三类失败模式做归因。
 
-## 6. 样本级分析输出
+## 6. 门槛标定（Calibration Phase）
+- 在正式冻结论文门槛前，运行 `bash scripts/cmd/calibrate_thresholds.sh`
+- 比较：
+  - `baseline_rag`
+  - `baseline_budget_matched`
+  - `baseline_single_round_strong`
+  - `edge_agent`
+  - 代表性 agent 变体
+- 当前阈值冻结记录：`data/manifests/threshold_calibration_policy.json`
+
+## 7. 样本级分析输出
 每轮必须输出：
 - `regression_top`
 - `improvement_top`
 - `latency_top`
 - 机制标签分布（forced_final/fastpath/refine_skip_reason/forced_search）
 
-## 7. 结果使用规则
+## 8. 结果使用规则
 - 论文主结论只引用 Main Track 的稳定通过结果。
 - Extended/Ablation 作为证据补充与机制解释，不替代主结论门槛。
+- student 结果只作为效率路线补充证据，不纳入主实验默认通过条件。

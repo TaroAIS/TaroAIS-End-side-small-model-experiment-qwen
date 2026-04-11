@@ -1,0 +1,48 @@
+# Stronger single-round baseline control.
+model:
+  backend: "local"
+  name_or_path: "qwen3:8b"
+  thinking:
+    enable: false
+    soft_switch:
+      think: "/think"
+      no_think: "/no_think"
+  decoding:
+    temperature: 0.15
+    top_p: 0.92
+    top_k: 40
+    max_new_tokens: 320
+
+local_backend:
+  provider: "ollama"
+  base_url: "http://localhost:11434/v1"
+  request_timeout_s: 300
+  use_mock_if_unavailable: true
+
+fallback:
+  enable: true
+  mode: "heuristic"
+
+retrieval:
+  embedding_model: "sentence-transformers"
+  index: "faiss"
+  sample_index: "faiss"
+  require_dense_in_formal: true
+  hybrid:
+    enable: true
+    alpha_dense: 0.65
+    alpha_lexical: 0.35
+    max_candidates: 16
+    dedup_by_chunk_id: true
+  chunk_size: 512
+  chunk_overlap: 128
+  top_k: 8
+
+prompt:
+  template: |
+    你是一个严谨的问答助手。请只根据 Context 回答 Question，答案要尽量完整但保持精炼。
+    如果 Context 不能支持答案，请明确回答证据不足。
+    Question: {question}
+    Context:
+    {context}
+    请直接输出最终答案，不要输出推理过程。
