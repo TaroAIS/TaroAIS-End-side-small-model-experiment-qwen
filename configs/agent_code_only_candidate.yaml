@@ -67,7 +67,7 @@ agent:
     code_compact: true
     task_modes:
       single_doc_qa: aggressive
-      multi_doc_qa: aggressive
+      multi_doc_qa: conservative
       code_qa: conservative
     entity_compact:
       enable: true

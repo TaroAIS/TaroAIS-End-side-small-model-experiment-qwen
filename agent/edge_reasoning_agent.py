@@ -168,6 +168,65 @@ class EdgeReasoningAgent(object):
         return out, applied, note
 
     @staticmethod
+    def _clean_code_answer(text, max_chars=160):
+        src = str(text or "").strip()
+        if not src:
+            return src, False, ""
+
+        notes = []
+        out = src.replace("\r\n", "\n").replace("\r", "\n")
+        out = re.sub(r"```[a-zA-Z0-9_+-]*", "", out).replace("```", "").strip()
+
+        inline_code = re.findall(r"`([^`\n]+)`", out)
+        for candidate in inline_code:
+            cand = str(candidate or "").strip()
+            if cand:
+                out = cand
+                notes.append("inline_code")
+                break
+
+        prefix_patterns = [
+            r"^\s*(the next line of code(?: is)?|answer|final answer)\s*[:：]\s*",
+            r"^\s*(wait|however|alternatively|but)\b[\s,:-]*",
+            r"^\s*(path|identifier|snippet)\s*[:：]\s*",
+        ]
+        changed = True
+        while changed:
+            changed = False
+            for pat in prefix_patterns:
+                m = re.match(pat, out, flags=re.I)
+                if m:
+                    out = out[m.end() :].strip()
+                    notes.append("strip_prefix")
+                    changed = True
+
+        lines = [x.strip() for x in out.split("\n") if x.strip()]
+        if lines:
+            code_like_patterns = [
+                r"^[@#]",
+                r"^(public|private|protected|return|if|for|while|try|catch|class|def|async|await|const|let|var)\b",
+                r"[;{}()]",
+                r"^[A-Za-z_][A-Za-z0-9_]*\s*[:=]",
+            ]
+            selected = None
+            for line in lines:
+                if any(re.search(pat, line, flags=re.I) for pat in code_like_patterns):
+                    selected = line
+                    notes.append("code_line")
+                    break
+            if selected is None:
+                selected = lines[0]
+                notes.append("first_line")
+            out = selected.strip(" `")
+
+        out = " ".join(out.split()).strip(" ,;")
+        if len(out) > int(max_chars):
+            out = out[: int(max_chars)].rstrip(" ,;")
+            notes.append("trim_len")
+
+        return out, (out != src), ";".join(sorted(set(notes)))
+
+    @staticmethod
     def _normalize_answer_by_type(text, answer_type):
         src = str(text or "").strip()
         at = str(answer_type or "open_text").strip().lower()
@@ -189,10 +248,15 @@ class EdgeReasoningAgent(object):
                 out = "Paragraph {}".format(m.group(1))
                 note = "type_paragraph_id"
         elif at == "entity_short":
-            parts = re.split(r"(?<=[\.\!\?。！？])\s+", src)
-            if len(parts) >= 2 and len(parts[0].strip()) >= 3:
-                out = parts[0].strip()
-                note = "type_entity_short"
+            yes_no_match = re.match(r"^\s*(yes|no)\b", src, flags=re.I)
+            if yes_no_match:
+                out = yes_no_match.group(1).lower()
+                note = "type_yes_no"
+            else:
+                parts = re.split(r"(?<=[\.\!\?。！？])\s+", src)
+                if len(parts) >= 2 and len(parts[0].strip()) >= 3:
+                    out = parts[0].strip()
+                    note = "type_entity_short"
 
         applied = out != src
         return out, applied, note
@@ -1092,6 +1156,18 @@ class EdgeReasoningAgent(object):
                     postprocess_note = "{};{}".format(postprocess_note, compact_note)
                 else:
                     postprocess_note = compact_note
+                postprocess_applied = True
+        code_compact_enable = bool(answer_postprocess_cfg.get("code_compact", False))
+        if task == "code_qa" and answer_postprocess_enable and code_compact_enable:
+            code_pred, code_applied, code_note = self._clean_code_answer(
+                pred, max_chars=answer_postprocess_max_chars
+            )
+            if code_applied:
+                pred = code_pred
+                if postprocess_note:
+                    postprocess_note = "{};{}".format(postprocess_note, code_note)
+                else:
+                    postprocess_note = code_note
                 postprocess_applied = True
 
         single_doc_refined = False

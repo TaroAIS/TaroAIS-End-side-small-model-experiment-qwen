@@ -157,7 +157,7 @@ def main():
                 # Keep formal run alive for statistical aggregation when backend has sporadic timeouts.
                 sample_error = 1
                 pred = ((hits[0] or {}).get("text", "") if hits else "")[:160]
-                backend_mode = "error_fallback"
+                backend_mode = "unknown"
 
         monitor.sample()
         if args.run_mode == "formal" and backend_mode != "real" and sample_error == 0:

@@ -1,6 +1,7 @@
 import os
 from collections import Counter
 import math
+from pathlib import Path
 
 try:
     import numpy as np
@@ -12,6 +13,8 @@ from utils.io import dump_jsonl, ensure_dir, load_jsonl, read_json, write_json
 
 
 class RetrievalIndex(object):
+    _ST_MODEL_CACHE = {}
+
     def __init__(
         self,
         embedding_model="sentence-transformers",
@@ -91,6 +94,30 @@ class RetrievalIndex(object):
                 "Dense retrieval required in formal mode but unavailable: {}".format(reason)
             )
 
+    @staticmethod
+    def _default_st_model_name():
+        return "sentence-transformers/all-MiniLM-L6-v2"
+
+    @classmethod
+    def _resolve_local_st_path(cls, model_name):
+        normalized = str(model_name or "").strip()
+        if normalized in ("", "sentence-transformers", cls._default_st_model_name()):
+            snapshot_root = (
+                Path.home()
+                / ".cache"
+                / "huggingface"
+                / "hub"
+                / "models--sentence-transformers--all-MiniLM-L6-v2"
+                / "snapshots"
+            )
+            if snapshot_root.exists():
+                for child in sorted(snapshot_root.iterdir()):
+                    if not child.is_dir():
+                        continue
+                    if (child / "modules.json").exists() and (child / "config.json").exists():
+                        return str(child)
+        return normalized or cls._default_st_model_name()
+
     def _try_dense_setup(self):
         if np is None:
             return False
@@ -99,8 +126,15 @@ class RetrievalIndex(object):
 
             model_name = self.embedding_model
             if model_name in ("sentence-transformers", "", None):
-                model_name = "sentence-transformers/all-MiniLM-L6-v2"
-            self._st_model = SentenceTransformer(model_name)
+                model_name = self._default_st_model_name()
+            model_name = self._resolve_local_st_path(model_name)
+            cache_key = str(model_name)
+            if cache_key not in self._ST_MODEL_CACHE:
+                kwargs = {}
+                if os.path.isdir(cache_key):
+                    kwargs["local_files_only"] = True
+                self._ST_MODEL_CACHE[cache_key] = SentenceTransformer(cache_key, **kwargs)
+            self._st_model = self._ST_MODEL_CACHE[cache_key]
             return True
         except Exception:
             self._st_model = None

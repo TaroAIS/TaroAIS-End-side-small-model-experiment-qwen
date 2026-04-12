@@ -63,11 +63,11 @@ agent:
   answer_postprocess:
     enable: true
     max_chars: 120
-    single_doc_compact: false
+    single_doc_compact: true
     code_compact: true
     task_modes:
       single_doc_qa: aggressive
-      multi_doc_qa: aggressive
+      multi_doc_qa: conservative
       code_qa: conservative
     entity_compact:
       enable: true
@@ -156,7 +156,7 @@ agent:
       final_refine_max_new_tokens: 128
       final_refine_temperature: 0.2
       answer_type_policy:
-        enable: false
+        enable: true
         fastpath_types:
         - count
         - paragraph_id
