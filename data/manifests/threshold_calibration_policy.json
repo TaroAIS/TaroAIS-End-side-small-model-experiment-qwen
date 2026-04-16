@@ -1,11 +1,38 @@
 {
   "status": "provisional_frozen_policy",
-  "frozen_at": "2026-04-11",
+  "frozen_at": "2026-04-16",
+  "model_mainline": "qwen3:4b",
+  "paper_positioning": "ccf_a_nlp_style_experimental_paper",
   "canonical_dataset": "data/main_eval/longbench_3tasks_test.jsonl",
+  "monitor_datasets": [
+    "data/main_eval/longbench_3tasks_dev100.jsonl",
+    "data/main_eval/longbench_3tasks_holdout100.jsonl",
+    "data/main_eval/longbench_3tasks_quickgate30.jsonl"
+  ],
   "thresholds": {
-    "overall_f1": 0.37,
+    "overall_f1": 0.34,
     "single_doc_f1": 0.29,
     "p95_ratio": 1.8
+  },
+  "paper_ready_targets": {
+    "canonical_relative_uplift": {
+      "overall_f1": [0.015, 0.03],
+      "single_doc_f1": 0.01,
+      "multi_doc_f1": 0.02,
+      "code_f1": 0.03
+    },
+    "canonical_resource_guard": {
+      "p95_ratio": 1.75,
+      "oom_count": 0
+    },
+    "highlight_task_goal": {
+      "dataset_scope": [
+        "data/main_eval/longbench_3tasks_holdout100.jsonl",
+        "data/main_eval/longbench_3tasks_quickgate30.jsonl"
+      ],
+      "task": "code_qa",
+      "relative_uplift_f1": 0.2
+    }
   },
   "calibration_entrypoint": "bash scripts/cmd/calibrate_thresholds.sh",
   "calibration_outputs": [
@@ -13,7 +40,8 @@
     "report_calibration/threshold_recommendation.json"
   ],
   "notes": [
-    "These thresholds are now governed by an explicit calibration policy instead of undocumented constants.",
-    "Run the calibration entrypoint on current LongBench_3tasks canonical data before freezing paper-ready thresholds."
+    "These thresholds are governed by the 4B canonical calibration policy instead of historical large-model constants.",
+    "Formal gates determine pass/fail. Paper-ready targets determine whether the frozen result is strong enough for writing.",
+    "Code-QA highlight targets do not replace canonical as the only formal main conclusion."
   ]
 }

@@ -23,7 +23,7 @@ def _teacher_to_driver_cfg(cfg, run_mode):
     out = {
         "model": {
             "backend": teacher.get("backend", "local"),
-            "name_or_path": teacher.get("name_or_path", "qwen3:8b"),
+            "name_or_path": teacher.get("name_or_path", "qwen3:4b"),
             "decoding": teacher.get("decoding", {}),
         },
         "local_backend": cfg.get("local_backend", {"base_url": "http://localhost:11434/v1", "request_timeout_s": 120}),

@@ -111,8 +111,8 @@ def main():
         "generated_from": str(input_root),
         "summary_csv": str(summary_path),
         "notes": [
-            "Use baseline_rag / baseline_budget_matched / baseline_single_round_strong / edge-agent variants to recalibrate canonical thresholds.",
-            "Current repository thresholds remain frozen in data/manifests/threshold_calibration_policy.json until this calibration report is reviewed.",
+            "Use the 4B baseline_rag / baseline_budget_matched / baseline_single_round_strong / edge-agent variants to recalibrate canonical thresholds.",
+            "Current repository thresholds remain provisional in data/manifests/threshold_calibration_policy.json until this calibration report is reviewed.",
         ],
     }
     (out_dir / "threshold_recommendation.json").write_text(

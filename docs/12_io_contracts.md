@@ -1,129 +1,91 @@
-# 12. I/O 契约
+# 12. I/O Contracts
 
-## 12.1 `scripts/prepare_longbench_3tasks.py`
-输入：
-- 远程 `LongBench` 官方压缩包
+## 12.1 主评测数据准备
+- `scripts/prepare_longbench_3tasks.py`
+  - 输出：
+    - `data/main_eval/longbench_3tasks_test.jsonl`
+    - `data/manifests/longbench_3tasks_source.json`
+- `scripts/build_main_eval_sets_v2.py`
+  - 输入：
+    - `data/train_ext/combined_valid.jsonl`
+    - `data/main_eval/longbench_3tasks_test.jsonl`
+  - 输出：
+    - `data/main_eval/longbench_3tasks_dev100.jsonl`
+    - `data/main_eval/longbench_3tasks_holdout100.jsonl`
+    - manifest JSON
+- `data/main_eval/longbench_3tasks_quickgate30.jsonl`
+  - 作为 canonical 晋级预筛集使用
 
-输出：
-- `data/main_eval/longbench_3tasks_test.jsonl`
-- `data/manifests/longbench_3tasks_source.json`
+## 12.2 扩展训练池
+- `scripts/prepare_task_ext_corpus.py`
+  - 输出：
+    - `data/train_ext/single_doc/*.jsonl`
+    - `data/train_ext/multi_doc/*.jsonl`
+    - `data/train_ext/code_qa/*.jsonl`
+- `scripts/build_combined_ext_sets.py`
+  - 输出：
+    - `data/train_ext/combined_train.jsonl`
+    - `data/train_ext/combined_valid.jsonl`
 
-约束：
-- 每行必须通过 `schemas/dataset.schema.json`
+## 12.3 补充代码泛化集
+- `scripts/build_code_generalization_subset.py`
+  - 输入：
+    - `data/train_ext/code_qa/repobench_python_valid.jsonl`
+    - `data/train_ext/code_qa/repobench_java_valid.jsonl`
+  - 输出：
+    - `data/main_eval/code_generalization/repobench_python_appendix.jsonl`
+    - `data/main_eval/code_generalization/repobench_java_appendix.jsonl`
+    - `data/main_eval/code_generalization/code_generalization_appendix.jsonl`
+    - `data/manifests/code_generalization_appendix_manifest.json`
+  - 说明：
+    - 只用于 `code_qa` 外部效度补充
+    - 不替代 canonical 主结论
 
-## 12.2 `scripts/prepare_task_ext_corpus.py`
-输入：
-- `NarrativeQA`
-- `Qasper`
-- `HotpotQA`
-- `MuSiQue`
-- `RepoBench v1.1`
+## 12.4 推理与评测
+- `run_baseline_rag.py`
+  - 输入：dataset + baseline config
+  - 输出：`results/baseline_*.jsonl`
+- `run_agent.py`
+  - 输入：dataset + agent config
+  - 输出：`results/edge_agent*.jsonl`
+- `evaluate.py`
+  - 输入：gold dataset + 1..N prediction files
+  - 输出：
+    - `metrics_table.csv`
+    - `task_metrics.csv`
+    - figure artifacts
+  - 契约：
+    - 输出字段保持稳定
+    - 不因 `4B + canonical` 主线切换而新增评测字段
 
-输出：
-- `data/train_ext/single_doc/*`
-- `data/train_ext/multi_doc/*`
-- `data/train_ext/code_qa/*`
-- `data/manifests/dataset_registry.json`
-- `data/manifests/dataset_versions.json`
+## 12.5 命令入口
+- `scripts/cmd/main_formal.sh`
+  - 负责主实验与 canonical 3-seed confirm
+- `scripts/cmd/student_branch.sh`
+  - 负责 student 蒸馏、训练与评测
+- `scripts/cmd/code_generalization_appendix.sh`
+  - 负责 `code_qa` 外部效度补充
+- `scripts/cmd/bench_key_tasks.sh`
+  - 默认执行 canonical 3-seed 确认
 
-约束：
-- 所有输出 JSONL 必须通过 `schemas/dataset.schema.json`
+## 12.6 轮次快照契约
+- 自动迭代快照文档：`docs/24_实验快照_当前.md`
+- 每轮必须记录：
+  - round 编号
+  - `config_profile / config_objective / config_snapshot`
+  - config diff
+  - 四路对照结果引用
+  - `dev100 / holdout100 / quickgate30 / canonical` 指标
+  - failure mode
+  - next action
+  - 若已触发，则补 canonical `3-seed confirm`
 
-## 12.3 `scripts/build_combined_ext_sets.py`
-输入：
-- 各任务组 `merged_train.jsonl`
-- 各任务组 `merged_valid.jsonl`
-
-输出：
-- `data/train_ext/combined_train.jsonl`
-- `data/train_ext/combined_valid.jsonl`
-
-## 12.4 `scripts/build_main_eval_sets_v2.py`
-输入：
-- `data/train_ext/combined_valid.jsonl`
-- `data/main_eval/longbench_3tasks_test.jsonl`
-
-输出：
-- `data/main_eval/longbench_3tasks_dev100.jsonl`
-- `data/main_eval/longbench_3tasks_holdout100.jsonl`
-- `data/manifests/main_eval_split_manifest.json`
-
-约束：
-- `dev/holdout` 与 canonical 不得样本重叠
-
-## 12.5 `scripts/build_corpus.py`
-输入：
-- `data/train_ext/combined_train.jsonl`
-
-输出：
-- `data/corpus_chunks.jsonl`
-- `data/index/`
-
-## 12.6 `run_baseline_rag.py`
-输入：
-- dataset JSONL
-- `configs/baseline_rag.yaml`
-
-输出：
-- `results/baseline_*.jsonl`
-
-约束：
-- 每行通过 `schemas/result.schema.json`
-
-## 12.7 `run_agent.py`
-输入：
-- dataset JSONL
-- `configs/agent.yaml`
-- `index_dir`
-
-输出：
-- `results/edge_agent*.jsonl`
-- `results/run_x/metadata.json`
-- 可选 `results/run_x/trace/{id}.json`
-
-## 12.8 `evaluate.py`
-输入：
-- gold dataset JSONL
-- 1..N 个 pred JSONL
-
-输出：
-- `report/metrics_table.csv`
-- `report/task_metrics.csv`
-- `report/key_task_summary.csv`
-- `report/*.png`
-
-约束：
-- 指标口径见 `docs/14_metrics_definition.md`
-
-## 12.9 `scripts/cmd/compare_controls.sh`
-输入：
-- `configs/baseline_budget_matched.yaml`
-- `configs/baseline_single_round_strong.yaml`
-- canonical dataset
-
-输出：
-- `results/baseline_budget_matched.jsonl`
-- `results/baseline_single_round_strong.jsonl`
-
-## 12.10 `scripts/cmd/main_formal.sh`
-行为：
-- 主实验默认入口
-- 仅运行主实验与消融，不默认触发 student 分支
-
-## 12.11 `scripts/cmd/student_branch.sh`
-行为：
-- 仅运行 student 数据蒸馏、训练与评测
-- 设计上应在主配置冻结后单独执行
-
-## 12.12 `scripts/cmd/calibrate_thresholds.sh`
-输入：
-- canonical dataset
-- `baseline_rag`
-- `baseline_budget_matched`
-- `baseline_single_round_strong`
-- 代表性 agent 配置
-
-输出：
-- `report_calibration/seed_*/metrics_table.csv`
-- `report_calibration/calibration_method_summary.csv`
-- `report_calibration/threshold_recommendation.json`
+## 12.7 Student
+- `scripts/cmd/distill.sh`
+  - teacher 固定来自冻结后的 `4B edge_agent`
+- `train_student.py`
+  - CLI 形状不变：`--config --train --out_dir`
+- `scripts/cmd/eval_student.sh`
+  - 执行顺序固定：
+    - `holdout100`
+    - `canonical`

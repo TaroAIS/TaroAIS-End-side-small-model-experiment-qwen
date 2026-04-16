@@ -1,103 +1,74 @@
-# Qwen3 端侧推理 + 小模型蒸馏 完整实验工程
+# Qwen3 4B Canonical 实验工程
 
-更新日期：2026-02-12
+更新日期：2026-04-16
 
-本仓库已经从模板阶段升级为可执行、可复现实验工程，目标是验证：
-- 在 `LongBench_3tasks canonical` 上，`edge_agent` 是否相对 `baseline_rag` 实现三任务平衡提升；
-- 同时满足“代价可接受”的成本门槛（延迟/检索开销）与多 seed 稳定性门槛。
+本仓库当前唯一正式主线是：
+- 主模型：`qwen3:4b`
+- 主结论数据：`LongBench_3tasks canonical`
+- 主问题：在严格预算下，`4B` 小模型能否通过任务路由式 agent 协议，在 `single_doc_qa / multi_doc_qa / code_qa` 三任务上实现平衡提升，同时守住时延与稳定性门槛
 
 ## 当前仓库状态
-- 主实验主链：`prepare -> index -> baseline -> compare_controls -> agent -> evaluate -> ablations`
+- 正式主流程：`prepare -> index -> baseline -> compare_controls -> agent -> eval -> ablations -> canonical 3-seed confirm`
 - Student 分支：`distill -> train_student -> eval_student`
-- 对照组：`baseline_rag` / `baseline_budget_matched` / `baseline_single_round_strong` / `edge_agent`
-- 消融：按 `质量 / 成本 / 稳定性` 三组组织
-- 补充 benchmark：关键任务多 seed 统计（`report_key_supp/`），不作为主胜负口径
+- 结果口径：
+  - `canonical` 是唯一论文主结论
+  - `dev100 / holdout100 / quickgate30` 只负责高频迭代、风险监测与晋级预筛
+  - `student` 是主配置冻结后的附加效率实验，不参与主结论通过判定
+  - `code_qa` 保留为高价值亮点任务，但不单独承担整篇论文主结论
 
-## 快速开始（工程运行）
-1) 先跑 smoke（链路验证，允许 fallback/mock）：
+## 论文故事
+- 不讲“大模型绝对更强”，而讲“`4B` 小模型在长上下文下存在任务异质性，统一协议会牺牲平衡性”
+- 主方法统一表述为：`budget-aware task-routed protocol for 4B long-context reasoning`
+- 主贡献统一表述为：
+  - 提出适配 `4B` 长文档场景的任务路由式 agent 协议
+  - 在 `LongBench_3tasks canonical` 上相对强对照实现三任务平衡提升
+  - 用分组消融解释质量、成本与稳定性来源
+
+## 快速开始
+1. 冒烟检查：
 - `bash scripts/cmd/smoke.sh`
 
-2) 再跑 formal 主实验（论文主结论入口，严格失败语义）：
+2. 正式主实验：
 - `bash scripts/cmd/main_formal.sh`
 
-3) 如需 student 分支：
-- `bash scripts/cmd/student_branch.sh`
-
-4) 如需关键任务补充 benchmark（默认 42/123/2026）：
-- `bash scripts/cmd/bench_key_tasks.sh`
-
-5) 如需门槛标定实验：
+3. 门槛校准：
 - `bash scripts/cmd/calibrate_thresholds.sh`
 
-脚本文档：`scripts/cmd/README.md`
+4. 自动迭代：
+- `python scripts/auto_iterate_formal.py`
 
-## 实验视角总览
-- 主对比：`baseline_rag` vs `baseline_budget_matched` vs `baseline_single_round_strong` vs `edge_agent`
-- 主实验口径：`run_mode=formal` + `retrieval_scope=sample`
-- `global` 检索范围仅用于扩展实验，不混入主表
-- 主结论口径：canonical 三任务门槛 + 多 seed + CI
-- 关键任务聚合默认：`key_tasks=multi_doc_qa code_qa` + `key_agg=macro`，仅作补充收益-成本对照
+5. 主配置冻结后 student 分支：
+- `bash scripts/cmd/student_branch.sh`
 
-## 结果如何读
-主结论建议读取顺序：
-1) `report/metrics_table.csv`
-2) `report/task_metrics.csv`
-3) `docs/14_metrics_definition.md`
+6. `code_qa` 外部效度补充：
+- `bash scripts/cmd/code_generalization_appendix.sh`
 
-补充 benchmark 读取顺序：
-1) `report_key_supp/decision_gate.json`
-2) `report_key_supp/seed_aggregate.csv`
-3) `report_key_supp/seed_<n>/key_task_summary.csv`
-
-## 当前结果快照说明（2026-02-12）
-- 当前仓库包含已运行产物快照（`report_tiny/`、`report_key_supp/`、`results/run_*`）。
-- 这些快照会随复跑变化，不应当作固定真值。
-- `report_key_supp` 当前快照来自补充 benchmark 或历史链路验证，不直接代表 canonical 主结论：
-  - `delta_f1_key_mean = -0.0625`
-  - `latency_ratio_key_mean = 3.6258`
-  - `retrieval_ratio_key_mean = 3.5`
-- 只有 `main_formal + canonical + multi-seed + CI` 的结果才用于论文主结论。
-
-## 数据来源与版本
-### Smoke 数据
-- `smoke_data/minilongbench_tiny.jsonl`
-- 3 条样本：`single_doc_qa` / `multi_doc_qa` / `code_qa`
-
-### 正式主评测
-- 主评测来源：Hugging Face `zai-org/LongBench`
-- 输出路径：`data/main_eval/longbench_3tasks_test.jsonl`
-- 仅保留三类任务：
-  - `single_doc_qa`: `narrativeqa/qasper/multifieldqa_en/multifieldqa_zh`
-  - `multi_doc_qa`: `hotpotqa/2wikimqa/musique/dureader`
-  - `code_qa`: `lcc/repobench-p`
-- 来源追溯：`data/manifests/longbench_3tasks_source.json`
-
-### 扩展训练池
-- `single_doc_qa`: `NarrativeQA + Qasper`
-- `multi_doc_qa`: `HotpotQA + MuSiQue`
-- `code_qa`: `RepoBench v1.1 (Python + Java)`
-- 合并输出：
+## 数据口径
+- 主结论：`data/main_eval/longbench_3tasks_test.jsonl`
+- 高频监测：`data/main_eval/longbench_3tasks_dev100.jsonl`
+- 风险监测：`data/main_eval/longbench_3tasks_holdout100.jsonl`
+- 晋级预筛：`data/main_eval/longbench_3tasks_quickgate30.jsonl`
+- 扩展训练池：
   - `data/train_ext/combined_train.jsonl`
   - `data/train_ext/combined_valid.jsonl`
-- 版本与注册清单：
-  - `data/manifests/dataset_registry.json`
-  - `data/manifests/dataset_versions.json`
+- 代码泛化补充：
+  - `data/main_eval/code_generalization/code_generalization_appendix.jsonl`
+  - 由 `RepoBench Python valid + RepoBench Java valid` 固定抽样构成
+
+## 主结果如何解读
+- 主文主表只看 `canonical + 4B + 3-seed + CI`
+- `baseline_budget_matched` 回答“收益是否只是多花预算”
+- `baseline_single_round_strong` 回答“收益是否只是单轮检索更强”
+- `dev100 / holdout100 / quickgate30` 只回答“当前 candidate 是否值得晋级 canonical”
+- `code_qa` 的大幅提升只作为亮点证据，不替代 canonical 主结论
+- `student` 只回答“冻结后的主策略能否进一步压缩”
 
 ## 文档入口
-- 实验主手册：`docs/23_experiment_playbook.md`
-- 消融与对照：`docs/06_experiment_design_and_ablation.md`
-- 门槛与标定：`docs/14_metrics_definition.md`
-- 更新记录：`docs/22_experiment_update_2026-02-12.md`
-- 文档索引：`docs/README.md`
-- 命令与流程：`scripts/cmd/README.md`
-
-## 目录说明
-- `docs/`：实验设计、解释口径、更新与论文映射
-- `configs/`：超参配置
-- `schemas/`：数据/结果/metadata/facts 的 JSON Schema
-- `templates/`：表格模板与图文件清单
-- `scripts/`：一键执行脚本与辅助脚本
-
-## 历史附录
-- `codex/` 目录保留为历史生成提示与验收清单归档。
-- 当前仓库主入口以可执行实验流程和实验解读文档为准。
+- 实验手册：[docs/23_experiment_playbook.md](/d:/taroPROJECT/end%20design/TaroAIS-End-side-small-model-experiment-qwen/docs/23_experiment_playbook.md)
+- 门槛说明：[docs/14_metrics_definition.md](/d:/taroPROJECT/end%20design/TaroAIS-End-side-small-model-experiment-qwen/docs/14_metrics_definition.md)
+- 消融设计：[docs/06_experiment_design_and_ablation.md](/d:/taroPROJECT/end%20design/TaroAIS-End-side-small-model-experiment-qwen/docs/06_experiment_design_and_ablation.md)
+- I/O 契约：[docs/12_io_contracts.md](/d:/taroPROJECT/end%20design/TaroAIS-End-side-small-model-experiment-qwen/docs/12_io_contracts.md)
+- 论文实验章节草稿：[docs/25_论文实验章节初稿.md](/d:/taroPROJECT/end%20design/TaroAIS-End-side-small-model-experiment-qwen/docs/25_%E8%AE%BA%E6%96%87%E5%AE%9E%E9%AA%8C%E7%AB%A0%E8%8A%82%E5%88%9D%E7%A8%BF.md)
+- 论文结果总表模板：[docs/37_论文结果总表模板.md](/d:/taroPROJECT/end%20design/TaroAIS-End-side-small-model-experiment-qwen/docs/37_%E8%AE%BA%E6%96%87%E7%BB%93%E6%9E%9C%E6%80%BB%E8%A1%A8%E6%A8%A1%E6%9D%BF.md)
+- `code_qa` 外部效度补充：[docs/38_code_qa_外部效度补充.md](/d:/taroPROJECT/end%20design/TaroAIS-End-side-small-model-experiment-qwen/docs/38_code_qa_%E5%A4%96%E9%83%A8%E6%95%88%E5%BA%A6%E8%A1%A5%E5%85%85.md)
+- 命令说明：[scripts/cmd/README.md](/d:/taroPROJECT/end%20design/TaroAIS-End-side-small-model-experiment-qwen/scripts/cmd/README.md)

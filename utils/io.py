@@ -47,6 +47,13 @@ def dump_jsonl(path, rows):
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def append_jsonl(path, rows):
+    ensure_dir(Path(path).parent)
+    with open(path, "a", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
 def load_yaml(path):
     with open(path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)

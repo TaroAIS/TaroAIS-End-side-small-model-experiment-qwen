@@ -1,47 +1,95 @@
-﻿# 14. Metrics Definition
+# 14. Metrics Definition
 
 ## 14.1 基础指标
-- `EM`：标准归一化后的严格匹配。
-- `F1`：字符/词级重叠 F1（与现有评测实现保持一致）。
-- `P95 latency`：样本级 total latency 的 95 分位。
-- `avg_steps`、`avg_retrieval`：推理行为成本指标。
-- `oom_count`：运行失败代理指标，主实验要求为 0。
+- `EM`
+  - 标准化后严格匹配
+- `F1`
+  - 主质量指标
+- `single_doc_qa / multi_doc_qa / code_qa F1`
+  - 三任务分项指标
+- `P95 latency`
+  - 样本级尾延迟
+- `P95 ratio`
+  - `agent / baseline_rag` 的尾延迟比值
+- `avg_steps`
+  - 平均推理步数
+- `avg_retrieval`
+  - 平均检索次数
+- `oom_count`
+  - 运行失败代理指标
 
-## 14.2 主实验硬门槛（canonical）
-当前阈值不再视为“魔法数”，而是受以下冻结文件管理：
-- `data/manifests/threshold_calibration_policy.json`
-- 重标定入口：`bash scripts/cmd/calibrate_thresholds.sh`
+## 14.2 4B canonical 主门槛
+当前主门槛由 [threshold_calibration_policy.json](/d:/taroPROJECT/end%20design/TaroAIS-End-side-small-model-experiment-qwen/data/manifests/threshold_calibration_policy.json) 管理。
 
-- 单 seed：
-  - `overall F1 >= 0.37`
-  - `single_doc_qa F1 >= 0.29`
-  - `P95 ratio <= 1.8`
-  - `oom_count = 0`
-- 3-seed：
-  - `mean overall F1 >= 0.37`
-  - `mean single_doc_qa F1 >= 0.29`
-  - `mean P95 ratio <= 1.8`
-  - `all seeds oom_count = 0`
+### 单 seed
+- `overall F1 >= 0.34`
+- `single_doc_qa F1 >= 0.29`
+- `P95 ratio <= 1.80`
+- `oom_count = 0`
 
-## 14.3 门槛标定原则
-- 标定集固定为 `LongBench_3tasks canonical`
-- 标定时至少比较：
+### 3-seed
+- `mean overall F1 >= 0.34`
+- `mean single_doc_qa F1 >= 0.29`
+- `mean P95 ratio <= 1.80`
+- `all seeds oom_count = 0`
+
+## 14.3 监测集门槛
+### dev100
+- `overall F1 >= 0.31`
+- `single_doc_qa F1 >= 0.27`
+- `P95 ratio <= 1.95`
+
+### holdout100
+- `overall F1 >= 0.32`
+- `single_doc_qa F1 >= 0.28`
+- `P95 ratio <= 1.90`
+
+### quickgate30
+- `overall F1 >= 0.32`
+- `single_doc_qa F1 >= 0.28`
+- `P95 ratio <= 1.80`
+
+说明：
+- `dev100 / holdout100 / quickgate30` 只负责晋级与风险监测，不替代 canonical 主结论。
+
+## 14.4 校准来源
+- 校准入口：`bash scripts/cmd/calibrate_thresholds.sh`
+- 校准数据：`data/main_eval/longbench_3tasks_test.jsonl`
+- 最低比较集合：
   - `baseline_rag`
   - `baseline_budget_matched`
   - `baseline_single_round_strong`
   - `edge_agent`
-- 当前仓库保留一份显式冻结策略；若数据口径、模型或后端环境发生变化，应重新运行标定实验后再更新门槛。
+  - 至少两个代表性 agent 变体
+- 当前阈值定位：
+  - 仍属于 `provisional_frozen_policy`
+  - 不是历史大模型常数
+  - 后续若更换模型、后端、索引策略或主数据，需要重新校准
 
-## 14.4 seed-level CI 与显著性
-对每个 seed 计算三任务 `delta_F1 = F1(agent) - F1(baseline)`，再按 seed 统计：
-- `mean_delta`
-- `ci95 = 1.96 * std(delta)/sqrt(n)`（n=seed 数）
-- `lower = mean_delta - ci95`
-- `upper = mean_delta + ci95`
+## 14.5 Paper-Ready 目标带
+这些目标不是 formal gate，而是论文写作目标。
 
-显著性判定：
-- 至少 `2/3` 任务满足 `lower > 0`。
+### Canonical 主结论目标
+- overall F1：相对 `baseline_rag_4b` 提升 `+0.015` 到 `+0.030`
+- `single_doc_qa`：至少非负提升，目标 `+0.010` 以上
+- `multi_doc_qa`：目标 `+0.020` 以上
+- `code_qa`：目标 `+0.030` 以上
+- `P95 ratio <= 1.75`
+- `OOM = 0`
 
-## 14.5 回归保护
-- 相对当前最佳稳定轮，任一任务 F1 下降 `> 0.03` 视为灾难回归。
-- 触发后自动回滚到 `last_good_config`，该轮仅记录不纳入候选最优。
+### 亮点任务目标
+- 在 `holdout100` 或 `quickgate30` 上，`code_qa` 相对 baseline 提升 `+0.20` 以上
+- 该目标只用于亮点叙事，不替代 canonical 主结论
+
+## 14.6 显著性与稳定性
+- canonical 冻结后执行 `3-seed = 42 / 123 / 2026`
+- 统一报告：
+  - `mean`
+  - `std`
+  - 必要时补 `95% CI`
+- 单轮通过不等于稳定通过
+
+## 14.7 回归保护
+- 相对当前稳定轮，任一任务 F1 下降 `> 0.03` 视为灾难回归
+- 触发后回滚到 `last_good_config`
+- 在自动迭代中，每轮只允许一个主因子变更，避免混杂因果

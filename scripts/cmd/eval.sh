@@ -21,4 +21,5 @@ PRED_FILES+=("results/edge_agent.jsonl")
   --gold "$GOLD_DATASET" \
   --pred "${PRED_FILES[@]}" \
   --out_dir report/ \
-  --run_mode "$RUN_MODE"
+  --run_mode "$RUN_MODE" \
+  --task_breakdown

@@ -1,24 +1,17 @@
-# Edge-Reasoning Agent ablation: budget_tight
-experiment:
-  profile: r23_lock_budget_tight
-  objective: canonical_three_task_balance
 model:
   backend: local
-  name_or_path: qwen3:8b
+  name_or_path: qwen3:4b
   thinking:
-    enable: true
-    soft_switch:
-      think: /think
-      no_think: /no_think
+    enable: false
   decoding:
-    temperature: 0.35
+    temperature: 0.2
     top_p: 0.9
-    top_k: 40
-    max_new_tokens: 224
+    top_k: 24
+    max_new_tokens: 160
 local_backend:
   provider: ollama
   base_url: http://localhost:11434/v1
-  request_timeout_s: 300
+  request_timeout_s: 180
   use_mock_if_unavailable: true
 fallback:
   enable: true
@@ -32,17 +25,17 @@ retrieval:
     enable: true
     alpha_dense: 0.65
     alpha_lexical: 0.35
-    max_candidates: 10
+    max_candidates: 8
     dedup_by_chunk_id: true
   chunk_size: 512
   chunk_overlap: 128
-  top_k_init: 1
+  top_k_init: 2
   top_k_iter: 1
 agent:
-  max_steps: 3
-  max_prompt_tokens: 8000
+  max_steps: 2
+  max_prompt_tokens: 6500
   memory_strategy: fact_memory
-  facts_per_step: 5
+  facts_per_step: 4
   early_stop:
     enable: true
     max_same_keyword_hits: 2
@@ -57,60 +50,16 @@ agent:
     temperature: 0.0
     top_p: 1.0
     top_k: 1
-    max_new_tokens: 72
-  answer_postprocess:
-    enable: true
-    max_chars: 96
-    single_doc_compact: true
-    task_modes:
-      single_doc_qa: aggressive
-      multi_doc_qa: conservative
-      code_qa: conservative
-    entity_compact:
-      enable: true
+    max_new_tokens: 64
   decoding_budget:
     enable: true
     short_question_token_threshold: 10
-    short_question_max_new_tokens: 128
-    default_max_new_tokens: 168
+    short_question_max_new_tokens: 96
+    default_max_new_tokens: 128
     task_caps:
-      code_qa: 180
-      multi_doc_qa: 192
-      single_doc_qa: 160
-  task_overrides:
-    code_qa:
-      top_k_init: 2
-      top_k_iter: 1
-      max_steps: 3
-      max_new_tokens: 180
-      temperature: 0.2
-    multi_doc_qa:
-      top_k_init: 2
-      top_k_iter: 1
-      max_steps: 3
-      max_new_tokens: 192
-      temperature: 0.2
-    single_doc_qa:
-      top_k_init: 3
-      max_steps: 2
-      enable_final_refine: true
-      final_refine_max_new_tokens: 96
-      final_refine_temperature: 0.2
-  uncertainty_trigger:
-    enable: true
-    patterns:
-    - not sure
-    - need to verify
-    - missing info
-  injection_defense:
-    enable: true
-    strip_patterns:
-    - ignore previous
-    - ignore above
-    - system prompt
-    - you are now
-    quote_chunks: true
-    label_as_evidence: true
+      code_qa: 136
+      multi_doc_qa: 144
+      single_doc_qa: 128
 logging:
   log_dir: results/logs
   nvml_sample_ms: 200

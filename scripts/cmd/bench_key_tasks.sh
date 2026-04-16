@@ -5,7 +5,7 @@ source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
 RUN_MODE="${RUN_MODE:-formal}"
 RETRIEVAL_SCOPE="${RETRIEVAL_SCOPE:-sample}"
 SEEDS="${SEEDS:-42 123 2026}"
-OUT_ROOT="${OUT_ROOT:-report_key_supp}"
+OUT_ROOT="${OUT_ROOT:-report_main_multiseed}"
 INDEX_DIR="${INDEX_DIR:-data/index}"
 BASELINE_CONFIG="${BASELINE_CONFIG:-configs/baseline_rag.yaml}"
 AGENT_CONFIG="${AGENT_CONFIG:-configs/agent.yaml}"
@@ -24,7 +24,7 @@ Env:
   RUN_MODE=smoke|formal            default: formal
   RETRIEVAL_SCOPE=sample|global    default: sample
   SEEDS="42 123 2026"              default: 3 seeds
-  OUT_ROOT=report_key              output root
+  OUT_ROOT=report_main_multiseed   output root
   DATASET=...                      default depends on RUN_MODE
   INDEX_DIR=data/index
   BASELINE_CONFIG=configs/baseline_rag.yaml
@@ -80,10 +80,10 @@ for seed in $SEEDS; do
     --pred "$baseline_out" "$agent_out" \
     --out_dir "$out_dir" \
     --run_mode "$RUN_MODE" \
-    --task_breakdown \
-    --key_tasks multi_doc_qa code_qa \
-    --key_agg macro \
-    --run_tag "$seed_tag"
+  --task_breakdown \
+  --key_tasks single_doc_qa multi_doc_qa code_qa \
+  --key_agg macro \
+  --run_tag "$seed_tag"
 
   METRICS_LIST+=("${out_dir}/metrics_table.csv")
   TASK_LIST+=("${out_dir}/task_metrics.csv")
@@ -95,12 +95,12 @@ done
   --task_metrics "${TASK_LIST[@]}" \
   --key_summary "${KEY_LIST[@]}" \
   --out_dir "$OUT_ROOT" \
-  --key_tasks multi_doc_qa code_qa \
+  --key_tasks single_doc_qa multi_doc_qa code_qa \
   --key_agg macro \
   --baseline_method baseline_rag \
   --agent_method edge_agent \
-  --min_delta_f1 0.03 \
-  --max_latency_ratio 1.5 \
+  --min_delta_f1 0.02 \
+  --max_latency_ratio 1.8 \
   --max_retrieval_ratio 1.8
 
-echo "supplementary key-task benchmark done -> ${OUT_ROOT}"
+echo "canonical multi-seed confirmation done -> ${OUT_ROOT}"

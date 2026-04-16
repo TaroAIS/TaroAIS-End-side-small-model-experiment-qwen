@@ -16,16 +16,22 @@ mkdir -p "$OUT_DIR" "$REPORT_DIR"
 "$PYTHON_BIN" run_agent.py --config configs/agent_memory_sliding.yaml --dataset "$DATASET" --index_dir "$INDEX_DIR" --out "$OUT_DIR/memory_sliding.jsonl" --run_mode "$RUN_MODE" --retrieval_scope "$RETRIEVAL_SCOPE"
 "$PYTHON_BIN" run_agent.py --config configs/agent_refine_gate_relaxed.yaml --dataset "$DATASET" --index_dir "$INDEX_DIR" --out "$OUT_DIR/refine_gate_relaxed.jsonl" --run_mode "$RUN_MODE" --retrieval_scope "$RETRIEVAL_SCOPE"
 "$PYTHON_BIN" run_agent.py --config configs/agent_budget_tight.yaml --dataset "$DATASET" --index_dir "$INDEX_DIR" --out "$OUT_DIR/budget_tight.jsonl" --run_mode "$RUN_MODE" --retrieval_scope "$RETRIEVAL_SCOPE"
+"$PYTHON_BIN" run_agent.py --config configs/agent_topk_tight.yaml --dataset "$DATASET" --index_dir "$INDEX_DIR" --out "$OUT_DIR/topk_tight.jsonl" --run_mode "$RUN_MODE" --retrieval_scope "$RETRIEVAL_SCOPE"
+"$PYTHON_BIN" run_agent.py --config configs/agent_max_steps_2.yaml --dataset "$DATASET" --index_dir "$INDEX_DIR" --out "$OUT_DIR/max_steps_2.jsonl" --run_mode "$RUN_MODE" --retrieval_scope "$RETRIEVAL_SCOPE"
 "$PYTHON_BIN" run_agent.py --config configs/agent_forced_retrieve_off.yaml --dataset "$DATASET" --index_dir "$INDEX_DIR" --out "$OUT_DIR/forced_retrieve_off.jsonl" --run_mode "$RUN_MODE" --retrieval_scope "$RETRIEVAL_SCOPE"
 "$PYTHON_BIN" run_agent.py --config configs/agent_early_stop_off.yaml --dataset "$DATASET" --index_dir "$INDEX_DIR" --out "$OUT_DIR/early_stop_off.jsonl" --run_mode "$RUN_MODE" --retrieval_scope "$RETRIEVAL_SCOPE"
+"$PYTHON_BIN" run_agent.py --config configs/agent_promotion_guard_off.yaml --dataset "$DATASET" --index_dir "$INDEX_DIR" --out "$OUT_DIR/promotion_guard_off.jsonl" --run_mode "$RUN_MODE" --retrieval_scope "$RETRIEVAL_SCOPE"
 
 "$PYTHON_BIN" evaluate.py --gold "$DATASET" --pred \
   "$OUT_DIR/iterative_off.jsonl" \
   "$OUT_DIR/memory_sliding.jsonl" \
   "$OUT_DIR/refine_gate_relaxed.jsonl" \
   "$OUT_DIR/budget_tight.jsonl" \
+  "$OUT_DIR/topk_tight.jsonl" \
+  "$OUT_DIR/max_steps_2.jsonl" \
   "$OUT_DIR/forced_retrieve_off.jsonl" \
   "$OUT_DIR/early_stop_off.jsonl" \
+  "$OUT_DIR/promotion_guard_off.jsonl" \
   --out_dir "$REPORT_DIR" \
   --run_mode "$RUN_MODE"
 

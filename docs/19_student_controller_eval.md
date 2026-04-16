@@ -1,20 +1,34 @@
-# 19. Student-Controller 专用评测（让“训练小模型”像成果）
+# 19. Student-Controller 评测
 
-## 19.1 两类评测
-A) 控制器行为评测（不跑大模型也能评）
-- 给定 (question + ctx摘要)，Student 输出 <search> 或 <final>
+## 19.1 目标
+student 只回答一个问题：
+- 冻结后的 `4B edge_agent` 是否可以蒸馏出更轻的控制器，同时尽量保留主趋势。
+
+## 19.2 评测分层
+### A. 控制器行为评测
 - 指标：
-  - trigger_acc（该 search 时 search 的准确率）
-  - macro-F1（search vs final 分类）
-  - keyword_hit_rate：用输出 keyword 检索 Top-1 是否命中 gold evidence（近似指标）
+  - `trigger_acc`
+  - `macro_f1`
+  - `keyword_hit_rate`
 
-B) 端到端评测（接入 Agent）
-- 用 Student 代替 Teacher 做“检索控制器”，推理端仍用 Qwen3-8B
-- 比较：
-  - 任务 F1
-  - avg_retrieval
+### B. 端到端评测
+- student 接管检索控制决策
+- 主推理模型仍按冻结后的 `Qwen3 4B` 主线配置运行
+- 对比维度：
+  - F1
+  - `avg_retrieval`
   - latency
 
-## 19.2 评测集构建建议
-- 从训练数据中留出 eval split（10~20%）
-- 保证 multi_doc_qa 占比足够（更能体现控制策略）
+## 19.3 执行顺序
+1. `holdout100`
+2. `canonical`
+
+## 19.4 结果汇报要求
+- 必报 `teacher / student` 质量差距
+- 必报时延或资源收益
+- 必报三任务相对排序是否保持一致
+- 必须说明 student 不参与主结论通过判定
+
+## 19.5 论文定位
+- student 是效率路线补充证据
+- student 不进入主结果表，也不替代 canonical 主结论

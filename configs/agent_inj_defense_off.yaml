@@ -1,7 +1,7 @@
 # Edge-Reasoning Agent ablation: inj_defense_off
 model:
   backend: "local"
-  name_or_path: "qwen3:8b"
+  name_or_path: "qwen3:4b"
   thinking:
     enable: true
     soft_switch:

@@ -1,7 +1,7 @@
 # Edge-Reasoning Agent ablation: think_off
 model:
   backend: "local"
-  name_or_path: "qwen3:8b"
+  name_or_path: "qwen3:4b"
   thinking:
     enable: false
     soft_switch:

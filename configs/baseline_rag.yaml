@@ -1,41 +1,41 @@
-# Standard RAG baseline (v4)
+# Standard RAG baseline for the 4B canonical mainline.
 model:
-  backend: "local"
-  name_or_path: "qwen3:8b"
+  backend: local
+  name_or_path: qwen3:4b
   thinking:
     enable: false
     soft_switch:
-      think: "/think"
-      no_think: "/no_think"
+      think: /think
+      no_think: /no_think
   decoding:
     temperature: 0.2
     top_p: 0.9
-    top_k: 40
-    max_new_tokens: 256
+    top_k: 30
+    max_new_tokens: 192
 
 local_backend:
-  provider: "ollama"
-  base_url: "http://localhost:11434/v1"
-  request_timeout_s: 300
+  provider: ollama
+  base_url: http://localhost:11434/v1
+  request_timeout_s: 180
   use_mock_if_unavailable: true
 
 fallback:
   enable: true
-  mode: "heuristic"
+  mode: heuristic
 
 retrieval:
-  embedding_model: "sentence-transformers"
-  index: "faiss"
-  sample_index: "lexical"
+  embedding_model: sentence-transformers
+  index: faiss
+  sample_index: lexical
   require_dense_in_formal: true
   chunk_size: 512
   chunk_overlap: 128
-  top_k: 5
+  top_k: 4
 
 prompt:
   template: |
-    你是一个严谨的问答助手。请只根据 Context 回答 Question，答案要简洁。
+    你是一个严谨的问答助手。请只根据 Context 回答 Question，答案要简洁准确。
     Question: {question}
     Context:
     {context}
-    请输出最终答案，不要输出推理过程。
+    请直接输出最终答案，不要输出推理过程。

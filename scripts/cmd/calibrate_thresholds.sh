@@ -16,7 +16,7 @@ BASELINE_CONFIGS=(
 )
 AGENT_CONFIGS=(
   "configs/agent.yaml"
-  "configs/agent_iterative_off.yaml"
+  "configs/agent_topk_tight.yaml"
   "configs/agent_budget_tight.yaml"
 )
 

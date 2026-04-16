@@ -1,4 +1,4 @@
-FROM qwen3:8b
+FROM qwen3:4b
 
 TEMPLATE """{{- $lastUserIdx := -1 -}}
 {{- range $idx, $msg := .Messages -}}

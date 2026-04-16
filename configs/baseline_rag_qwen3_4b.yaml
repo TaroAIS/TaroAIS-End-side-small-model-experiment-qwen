@@ -1,0 +1,41 @@
+# Fast-track standard RAG baseline with Qwen3 4B.
+model:
+  backend: local
+  name_or_path: qwen3:4b
+  thinking:
+    enable: false
+    soft_switch:
+      think: /think
+      no_think: /no_think
+  decoding:
+    temperature: 0.2
+    top_p: 0.9
+    top_k: 30
+    max_new_tokens: 192
+
+local_backend:
+  provider: ollama
+  base_url: http://localhost:11434/v1
+  request_timeout_s: 180
+  use_mock_if_unavailable: true
+
+fallback:
+  enable: true
+  mode: heuristic
+
+retrieval:
+  embedding_model: sentence-transformers
+  index: faiss
+  sample_index: lexical
+  require_dense_in_formal: true
+  chunk_size: 512
+  chunk_overlap: 128
+  top_k: 4
+
+prompt:
+  template: |
+    你是一个严谨的问答助手。请只根据 Context 回答 Question，答案要简洁。
+    Question: {question}
+    Context:
+    {context}
+    请输出最终答案，不要输出推理过程。

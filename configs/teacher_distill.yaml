@@ -1,9 +1,9 @@
-# Teacher distillation config for Student-Controller (v4)
+# Teacher distillation config for Student-Controller on the 4B mainline.
 teacher:
   backend: "local"
-  name_or_path: "qwen3:8b"
+  name_or_path: "qwen3:4b"
   thinking:
-    enable: true
+    enable: false
     soft_switch:
       think: "/think"
       no_think: "/no_think"
@@ -11,7 +11,7 @@ teacher:
     temperature: 0.6
     top_p: 0.95
     top_k: 20
-    max_new_tokens: 512
+    max_new_tokens: 384
 
 local_backend:
   provider: "ollama"
@@ -27,18 +27,16 @@ distill:
   max_steps: 4
   top_k_init: 3
   top_k_iter: 1
-  output_style: "controller"  # controller|reasoner
-
-  # Data quality constraints
+  output_style: "controller"
   quality:
     require_strict_tags: true
     allow_repair_once: true
     drop_if_still_invalid: true
     min_keyword_len: 2
     max_keyword_len: 24
-
   system_prompt: |
-    你是“检索控制器”。你必须严格按协议输出：
-    - 信息不足：<search>关键词</search>
-    - 信息足够：<final>答案</final>
+    你是“检索控制器”。
+    必须严格按协议输出：
+    - 信息不足时：<search>关键词</search>
+    - 信息足够时：<final>答案</final>
     不要输出多余文本。

@@ -1,0 +1,66 @@
+model:
+  backend: local
+  name_or_path: qwen3:4b
+  thinking:
+    enable: false
+  decoding:
+    temperature: 0.25
+    top_p: 0.9
+    top_k: 30
+    max_new_tokens: 224
+local_backend:
+  provider: ollama
+  base_url: http://localhost:11434/v1
+  request_timeout_s: 180
+  use_mock_if_unavailable: true
+fallback:
+  enable: true
+  mode: heuristic
+retrieval:
+  embedding_model: sentence-transformers
+  index: faiss
+  sample_index: faiss
+  require_dense_in_formal: true
+  hybrid:
+    enable: true
+    alpha_dense: 0.65
+    alpha_lexical: 0.35
+    max_candidates: 8
+    dedup_by_chunk_id: true
+  chunk_size: 512
+  chunk_overlap: 128
+  top_k_init: 1
+  top_k_iter: 0
+agent:
+  max_steps: 3
+  max_prompt_tokens: 7000
+  memory_strategy: fact_memory
+  facts_per_step: 5
+  early_stop:
+    enable: true
+    max_same_keyword_hits: 2
+    max_no_new_chunk_steps: 1
+    enable_single_doc_shortcut: true
+    single_doc_max_steps: 2
+    enable_query_rewrite_retry: false
+  format_repair:
+    enable: true
+    max_retries: 1
+  protocol_decoding:
+    temperature: 0.0
+    top_p: 1.0
+    top_k: 1
+    max_new_tokens: 72
+  task_overrides:
+    code_qa:
+      top_k_init: 1
+      top_k_iter: 0
+    multi_doc_qa:
+      top_k_init: 1
+      top_k_iter: 0
+    single_doc_qa:
+      top_k_init: 2
+logging:
+  log_dir: results/logs
+  nvml_sample_ms: 200
+  save_trace: true

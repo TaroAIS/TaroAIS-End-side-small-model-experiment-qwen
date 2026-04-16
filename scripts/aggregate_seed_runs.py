@@ -376,7 +376,7 @@ def main():
     parser.add_argument("--task_metrics", nargs="*", default=[], help="optional task_metrics.csv paths.")
     parser.add_argument("--key_summary", nargs="*", default=[], help="optional key_task_summary.csv paths.")
     parser.add_argument("--out_dir", required=True)
-    parser.add_argument("--key_tasks", nargs="+", default=["multi_doc_qa", "code_qa"])
+    parser.add_argument("--key_tasks", nargs="+", default=["single_doc_qa", "multi_doc_qa", "code_qa"])
     parser.add_argument("--key_agg", choices=["macro", "micro"], default="macro")
     parser.add_argument("--baseline_method", default="baseline_rag")
     parser.add_argument("--agent_method", default="edge_agent")

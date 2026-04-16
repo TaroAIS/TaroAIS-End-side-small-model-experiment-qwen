@@ -1,0 +1,220 @@
+experiment:
+  profile: canonical_qwen3_4b_r5_backbone_budgeted
+  objective: canonical_three_task_balance_4b_r5
+model:
+  backend: local
+  name_or_path: qwen3:4b
+  thinking:
+    enable: false
+    soft_switch:
+      think: /think
+      no_think: /no_think
+  decoding:
+    temperature: 0.35
+    top_p: 0.9
+    top_k: 40
+    max_new_tokens: 224
+local_backend:
+  provider: ollama
+  base_url: http://localhost:11434/v1
+  request_timeout_s: 300
+  use_mock_if_unavailable: true
+fallback:
+  enable: true
+  mode: heuristic
+retrieval:
+  embedding_model: sentence-transformers
+  index: faiss
+  sample_index: faiss
+  require_dense_in_formal: true
+  hybrid:
+    enable: true
+    alpha_dense: 0.65
+    alpha_lexical: 0.35
+    max_candidates: 12
+    dedup_by_chunk_id: true
+  chunk_size: 512
+  chunk_overlap: 128
+  top_k_init: 2
+  top_k_iter: 1
+  cache:
+    embedding_cache: true
+    retrieval_cache: false
+agent:
+  max_steps: 4
+  max_prompt_tokens: 8000
+  memory_strategy: fact_memory
+  facts_per_step: 5
+  early_stop:
+    enable: true
+    max_same_keyword_hits: 3
+    max_no_new_chunk_steps: 2
+    enable_single_doc_shortcut: true
+    single_doc_max_steps: 3
+    enable_query_rewrite_retry: false
+  format_repair:
+    enable: true
+    max_retries: 2
+  protocol_decoding:
+    temperature: 0.0
+    top_p: 1.0
+    top_k: 1
+    max_new_tokens: 72
+  answer_postprocess:
+    enable: true
+    max_chars: 120
+    single_doc_compact: false
+    code_compact: true
+    task_modes:
+      single_doc_qa: aggressive
+      multi_doc_qa: aggressive
+      code_qa: conservative
+    entity_compact:
+      enable: true
+  single_doc_refine:
+    policy:
+      force_retrieve_requires_low_confidence: true
+      force_retrieve_requires_low_overlap: false
+      force_retrieve_low_overlap_threshold: 0.18
+  single_doc_generic:
+    enable: false
+    patterns:
+    - according to the context
+    - based on the context
+    - from the context
+    max_steps: 3
+    disable_refine: true
+  decoding_budget:
+    enable: true
+    short_question_token_threshold: 12
+    short_question_max_new_tokens: 160
+    default_max_new_tokens: 176
+    task_caps:
+      code_qa: 192
+      multi_doc_qa: 208
+      single_doc_qa: 176
+    dev_guard:
+      target_p95_ratio: 2.3
+      target_single_doc_f1: 0.24
+  task_overrides:
+    code_qa:
+      top_k_init: 3
+      top_k_iter: 1
+      max_steps: 4
+      max_new_tokens: 192
+      temperature: 0.2
+      low_confidence:
+        enable: true
+        min_answer_chars: 20
+        uncertainty_markers:
+        - not sure
+        - maybe
+        - unknown
+        - todo
+        truncated_tail_markers:
+        - and
+        - or
+        - ','
+        - ':'
+        - ;
+      forced_retrieve:
+        enable: true
+        max_extra_searches: 1
+        top_k_extra: 1
+    multi_doc_qa:
+      top_k_init: 3
+      top_k_iter: 2
+      max_steps: 4
+      max_new_tokens: 208
+      enable_query_rewrite_retry: false
+      rewrite_requires_no_new_chunks: true
+      temperature: 0.25
+      low_confidence:
+        enable: true
+        min_answer_chars: 24
+        uncertainty_markers:
+        - maybe
+        - not sure
+        - unclear
+        - need to verify
+        truncated_tail_markers:
+        - and
+        - or
+        - ','
+        - ':'
+        - ;
+      forced_retrieve:
+        enable: true
+        max_extra_searches: 1
+        top_k_extra: 1
+        force_on_first_final: false
+    single_doc_qa:
+      top_k_init: 4
+      max_steps: 3
+      enable_final_refine: true
+      always_refine: false
+      final_refine_max_new_tokens: 96
+      final_refine_temperature: 0.2
+      answer_type_policy:
+        enable: false
+        fastpath_types:
+        - count
+        - paragraph_id
+        - entity_short
+        fastpath_max_steps: 2
+        fastpath_disable_refine: true
+        forced_retrieve_overlap_threshold: 0.12
+        fastpath_min_answer_chars: 1
+      refine_gate:
+        on_format_repair_failed: true
+        on_uncertainty_marker: true
+        on_forced_final: true
+      low_confidence:
+        enable: true
+        min_answer_chars: 24
+        uncertainty_markers:
+        - wait
+        - maybe
+        - however
+        - not sure
+        - unclear
+        truncated_tail_markers:
+        - which
+        - that
+        - and
+        - or
+        - ','
+        - ':'
+        - ;
+      forced_retrieve:
+        enable: true
+        max_extra_searches: 1
+        top_k_extra: 1
+        force_on_first_final: false
+      long_context:
+        enable: true
+        threshold_chars: 80000
+        top_k_init: 4
+        max_steps: 3
+        enable_single_doc_shortcut: false
+        disable_refine_over_threshold: false
+        disable_forced_retrieve_over_threshold: false
+  uncertainty_trigger:
+    enable: true
+    patterns:
+    - not sure
+    - need to verify
+    - missing info
+  injection_defense:
+    enable: true
+    strip_patterns:
+    - ignore previous
+    - ignore above
+    - system prompt
+    - you are now
+    quote_chunks: true
+    label_as_evidence: true
+logging:
+  log_dir: results/logs
+  nvml_sample_ms: 200
+  save_trace: true

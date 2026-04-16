@@ -1,24 +1,17 @@
-# Edge-Reasoning Agent ablation: memory_sliding
-experiment:
-  profile: r23_lock_memory_sliding
-  objective: canonical_three_task_balance
 model:
   backend: local
-  name_or_path: qwen3:8b
+  name_or_path: qwen3:4b
   thinking:
-    enable: true
-    soft_switch:
-      think: /think
-      no_think: /no_think
+    enable: false
   decoding:
-    temperature: 0.35
+    temperature: 0.25
     top_p: 0.9
-    top_k: 40
-    max_new_tokens: 272
+    top_k: 30
+    max_new_tokens: 224
 local_backend:
   provider: ollama
   base_url: http://localhost:11434/v1
-  request_timeout_s: 300
+  request_timeout_s: 180
   use_mock_if_unavailable: true
 fallback:
   enable: true
@@ -32,85 +25,41 @@ retrieval:
     enable: true
     alpha_dense: 0.65
     alpha_lexical: 0.35
-    max_candidates: 12
+    max_candidates: 10
     dedup_by_chunk_id: true
   chunk_size: 512
   chunk_overlap: 128
   top_k_init: 2
   top_k_iter: 1
 agent:
-  max_steps: 4
-  max_prompt_tokens: 8000
+  max_steps: 3
+  max_prompt_tokens: 7000
   memory_strategy: sliding_window
-  facts_per_step: 6
+  facts_per_step: 5
   early_stop:
     enable: true
-    max_same_keyword_hits: 3
-    max_no_new_chunk_steps: 2
+    max_same_keyword_hits: 2
+    max_no_new_chunk_steps: 1
     enable_single_doc_shortcut: true
-    single_doc_max_steps: 3
-    enable_query_rewrite_retry: true
+    single_doc_max_steps: 2
+    enable_query_rewrite_retry: false
   format_repair:
     enable: true
-    max_retries: 2
+    max_retries: 1
   protocol_decoding:
     temperature: 0.0
     top_p: 1.0
     top_k: 1
-    max_new_tokens: 96
-  answer_postprocess:
-    enable: true
-    max_chars: 120
-    single_doc_compact: false
-    task_modes:
-      single_doc_qa: aggressive
-      multi_doc_qa: conservative
-      code_qa: conservative
-    entity_compact:
-      enable: true
+    max_new_tokens: 72
   decoding_budget:
     enable: true
     short_question_token_threshold: 12
-    short_question_max_new_tokens: 192
-    default_max_new_tokens: 208
+    short_question_max_new_tokens: 128
+    default_max_new_tokens: 160
     task_caps:
-      code_qa: 220
-      multi_doc_qa: 240
-      single_doc_qa: 200
-  task_overrides:
-    code_qa:
-      top_k_init: 3
-      top_k_iter: 1
-      max_steps: 4
-      max_new_tokens: 220
-      temperature: 0.2
-    multi_doc_qa:
-      top_k_init: 3
-      top_k_iter: 2
-      max_steps: 4
-      max_new_tokens: 240
-      temperature: 0.25
-    single_doc_qa:
-      top_k_init: 4
-      max_steps: 3
-      enable_final_refine: true
-      final_refine_max_new_tokens: 128
-      final_refine_temperature: 0.2
-  uncertainty_trigger:
-    enable: true
-    patterns:
-    - not sure
-    - need to verify
-    - missing info
-  injection_defense:
-    enable: true
-    strip_patterns:
-    - ignore previous
-    - ignore above
-    - system prompt
-    - you are now
-    quote_chunks: true
-    label_as_evidence: true
+      code_qa: 160
+      multi_doc_qa: 176
+      single_doc_qa: 160
 logging:
   log_dir: results/logs
   nvml_sample_ms: 200

@@ -13,3 +13,4 @@ bash scripts/cmd/compare_controls.sh
 bash scripts/cmd/agent.sh
 bash scripts/cmd/eval.sh
 bash scripts/cmd/ablations.sh
+bash scripts/cmd/bench_key_tasks.sh
