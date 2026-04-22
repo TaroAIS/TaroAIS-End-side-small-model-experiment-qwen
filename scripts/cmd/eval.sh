@@ -22,4 +22,13 @@ PRED_FILES+=("results/edge_agent.jsonl")
   --pred "${PRED_FILES[@]}" \
   --out_dir report/ \
   --run_mode "$RUN_MODE" \
-  --task_breakdown
+  --task_breakdown \
+  --key_tasks single_doc_qa multi_doc_qa code_qa \
+  --key_agg macro
+
+if [[ -f report/metrics_table.csv && -f report/task_metrics.csv && -f report/error_cases.jsonl ]]; then
+  "$PYTHON_BIN" scripts/render_paper_figures.py \
+    --report_dir report/ \
+    --out_dir report/paper_figures || \
+    echo "[warn] paper figure auto-render failed; report metrics are still available."
+fi
